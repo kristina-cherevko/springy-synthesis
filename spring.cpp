@@ -7,7 +7,7 @@
 #define MAX_VARS 16  // the largest allowed number of inputs
 #define MAX_SIZE 256 // the number of initially allocated objects
 #define KC_GG_NULL (0x7FFFFFFF)
-
+int Num = rand();
 /*************************************************************
                      Various helpers
 **************************************************************/
@@ -893,17 +893,34 @@ extern "C"
     {
         clock_t clkStart = clock();
         kc_vt Outs, *outs = &Outs;
+        int i, j, iChange, iDelete, iCand;
+        int start = (2*(gg->nins + 1) + 1);
         kc_gg *gg = kc_gg_aiger_read(fileName, verbose);
-        /*
-        for (int i = 0; i < nAdds; i++) {
-            - addNode()
-            - verify circuit after addition
+        kc_gg *ggReverse;
+        
+        for (i = 0; i < nAdds;) {
+            for (j = start; j < gg->size; j++) {
+                iChange = start + Num % (gg->size - start);
+                iCand = 2 + Num % ((iChange - 2) - 2);
+                ggReverse = gg;
+                kc_gg_add_node(gg, iChange, iCand);
+                if (!kc_gg_is_correct(gg))
+                    kc_gg_reverse(gg, ggReverse);
+                else
+                    i++;
+            }
         }
-        while (kc_gg_can_delete_node()) {
-            - deleteNode
-            - verify circuit after deletion
+        while (kc_gg_can_delete_node(gg)) {
+            for (j = start; j < gg->size; j++) {
+                iDelete = start + Num % (gg->size - start);
+                iCand = 2 + Num % ((iChange - 2) - 2);
+                ggReverse = gg;
+                kc_gg_delete_node(gg, iDelete, iCand);
+                if (!kc_gg_is_correct(gg))
+                    kc_gg_reverse(gg, ggReverse);
+            }
         }
-        */
+        
         return 1;
     }
 }
