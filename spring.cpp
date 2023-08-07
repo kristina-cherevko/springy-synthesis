@@ -745,11 +745,11 @@ static int *kc_aiger_read(char *pFileName, int *pnObjs, int *pnIns, int *pnLatch
         return NULL;
     }
     nObjs = 1 + nIns + 2 * nLatches + nOuts + nAnds;
-    pObjs = (int *)calloc(sizeof(int), 2 *nObjs);
-    pOuts = (int *)calloc(sizeof(int), 2 *nOuts);
+    pObjs = (int *)calloc(sizeof(int), 2 * nObjs);
+    pOuts = (int *)calloc(sizeof(int), 2 * nOuts);
     for (i = 0; i <= nIns + nLatches; i++)
         pObjs[2 * i] = pObjs[2 * i + 1] = KC_GG_NULL;
-        
+
     // read flop input literals
     for (i = 0; i < nLatches; i++)
     {
@@ -762,7 +762,8 @@ static int *kc_aiger_read(char *pFileName, int *pnObjs, int *pnIns, int *pnLatch
     // read output literals
     for (i = 0; i < nOuts; i++)
     {
-        while (fgetc(pFile) != '\n');
+        while (fgetc(pFile) != '\n')
+            ;
         fscanf(pFile, "%d", &Temp);
         pObjs[2 * (nObjs - nOuts - nLatches + i) + 0] = Temp;
         pObjs[2 * (nObjs - nOuts - nLatches + i) + 1] = Temp;
@@ -800,7 +801,7 @@ static kc_gg *kc_gg_aiger_read(char *pFileName, int fVerbose)
     int nObjs, nIns, nLatches, nOuts, nAnds, *pObjs = kc_aiger_read(pFileName, &nObjs, &nIns, &nLatches, &nOuts, &nAnds, outs);
     if (pObjs == NULL)
         return NULL;
-   
+
     kc_gg *p = kc_gg_start(nIns, outs);
     p->cap = 2 * nObjs;
     p->size = 2 * nObjs;
@@ -874,45 +875,48 @@ static void kc_gg_aiger_test(char *pFileNameIn, char *pFileNameOut)
 }
 
 /*************************************************************
+                  Top level procedures
+**************************************************************/
+
+extern "C"
+{
+    /*
+    TO solve the problem I need:
+    - read circuit from AIG file and create a graph structure in my environment.
+    - implement top_level function that will add nodes nAdds times and verify new circuit and after completion it
+    will delete nodes while it is possible (it'll be impossible if we can't delete any node).
+    - implement addNode function that will insert node to specific location of graph by resizing graph and moving right
+    part of it. To insert node
+    */
+    // solving one instance of a problem
+    int kc_top_level_call(char *fileName, int nAdds, int verbose)
+    {
+        clock_t clkStart = clock();
+        kc_vt Outs, *outs = &Outs;
+        kc_gg *gg = kc_gg_aiger_read(fileName, verbose);
+        /*
+        for (int i = 0; i < nAdds; i++) {
+            - addNode()
+            - verify circuit after addition
+        }
+        while (kc_gg_can_delete_node()) {
+            - deleteNode
+            - verify circuit after deletion
+        }
+        */
+        return 1;
+    }
+}
+
+/*************************************************************
                    main() procedure
 **************************************************************/
 
 int main(int argc, char **argv)
 {
-    
-    // if (argc == 1)
-    // {
-    //     printf("usage:  %s [-p] [-a] [-v] <string>\n", argv[0]);
-    //     printf("        this program synthesized circuits from truth tables\n");
-    //     printf("        -p : enables trying all variable permutations\n");
-    //     printf("        -a : enables using only and-gates (no xor-gates)\n");
-    //     printf("        -v : enables verbose output\n");
-    //     printf("  <string> : a truth table in hex notation or a file name\n");
-    //     return 1;
-    // }
-    // else
-    // {
-        char *input = "../rec-synthesis/outputs/80.aig";
-        char *output = "80-tested.aig";
-        kc_gg_aiger_test(input, output);
-        // int try_perm = 0;
-        // int and_only = 0;
-        // int verbose = 0;
-        // int i;
-        // for (i = 1; i < argc; i++)
-        // {
-        //     if (argv[i][0] == '-' && argv[i][1] == 'p' && argv[i][2] == '\0')
-        //         try_perm ^= 1;
-        //     if (argv[i][0] == '-' && argv[i][1] == 'a' && argv[i][2] == '\0')
-        //         and_only ^= 1;
-        //     if (argv[i][0] == '-' && argv[i][1] == 'v' && argv[i][2] == '\0')
-        //         verbose ^= 1;
-        // }
-        // if (strstr(argv[argc - 1], ".filelist")) // solve several problems
-        //     return kc_top_level_list(argv[argc - 1], try_perm, and_only, verbose);
-        // else // solve one problem
-        //     return kc_top_level_call(argv[argc - 1], try_perm, and_only, verbose);
-    // }
+    char *input = "../rec-synthesis/outputs/80.aig";
+    char *output = "80-tested.aig";
+    kc_gg_aiger_test(input, output);
 }
 
 /*************************************************************
