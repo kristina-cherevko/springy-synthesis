@@ -4,10 +4,11 @@
 #include <assert.h>
 #include <time.h>
 #include <regex>
+
 #define MAX_VARS 16  // the largest allowed number of inputs
 #define MAX_SIZE 256 // the number of initially allocated objects
 #define KC_GG_NULL (0x7FFFFFFF)
-int Num = rand();
+#define Num rand()
 /*************************************************************
                      Various helpers
 **************************************************************/
@@ -117,10 +118,35 @@ static inline void kc_vi_grow(kc_vi *v)
     }
     v->cap = newcap;
 }
+// static inline void kc_vi_shift(kc_vi *v, int idx, int e)
+// {
+//     printf("index = %i, e = %i, read = %i ", idx, e, kc_vi_read(v, idx));
+//     kc_v
+//     // v->ptr[v->size++] = e;
+// }
 static inline void kc_vi_push(kc_vi *v, int e)
 {
     kc_vi_grow(v);
     v->ptr[v->size++] = e;
+}
+static inline void kc_vi_push_idx(kc_vi *v, int e, int idx)
+{
+    kc_vi_grow(v);
+    v->size++;
+    for (int j = v->size - 1; j >= idx; j--)
+        v->ptr[j + 1] = v->ptr[j];
+    // shift procedure kc_vi_shift(v, idx);
+    v->ptr[idx] = e;
+}
+static inline void kc_vi_push2(kc_vi *v, int e1, int e2)
+{
+    kc_vi_push(v, e1);
+    kc_vi_push(v, e2);
+}
+static inline void kc_vi_push2_idx(kc_vi *v, int e1, int e2, int idx)
+{
+    kc_vi_push_idx(v, e1, idx);
+    kc_vi_push_idx(v, e2, idx + 1);
 }
 static inline void kc_vi_fill(kc_vi *v, int n, int fill)
 {
@@ -168,51 +194,17 @@ typedef struct kc_vt_
     kc_uint64 *ptr;
 } kc_vt;
 
-static inline kc_uint64 *kc_vt_array(kc_vt *v) { return v->ptr; }
 static inline int kc_vt_words(kc_vt *v) { return v->words; }
 static inline int kc_vt_size(kc_vt *v) { return v->size; }
-static inline void kc_vt_resize(kc_vt *v, int ttNum)
-{
-    assert(ttNum <= v->size);
-    v->size = ttNum;
-} // only safe to shrink !!
-static inline void kc_vt_shrink(kc_vt *v, int num)
-{
-    assert(num <= v->size);
-    v->size -= num;
-}
+static inline kc_uint64 *kc_vt_array(kc_vt *v) { return v->ptr; }
 static inline kc_uint64 *kc_vt_read(kc_vt *v, int ttId)
 {
     assert(ttId < v->size);
     return v->ptr + ttId * v->words;
 }
-static inline void kc_vt_grow(kc_vt *v)
-{
-    if (v->size == v->cap)
-    {
-        int newcap = (v->cap < 4) ? 8 : (v->cap / 2) * 3;
-        v->ptr = (kc_uint64 *)realloc(v->ptr, 8 * newcap * v->words);
-        if (v->ptr == NULL)
-        {
-            printf("Failed to realloc memory from %.1f MB to %.1f MB.\n", 4.0 * v->cap * v->words / (1 << 20), 4.0 * newcap * v->words / (1 << 20));
-            fflush(stdout);
-        }
-        v->cap = newcap;
-    }
-}
-static inline kc_uint64 *kc_vt_append(kc_vt *v)
-{
-    kc_vt_grow(v);
-    return v->ptr + v->size++ * v->words;
-}
-static inline void kc_vt_move(kc_vt *v, kc_vt *v2, int ttId)
-{
-    assert(v->words == v2->words);
-    memmove(kc_vt_append(v), kc_vt_read(v2, ttId), 8 * v->words);
-}
 
 /*************************************************************
-               Initialization of truth tables
+             Boolean operations on truth tables
 **************************************************************/
 
 static kc_uint64 s_Truths6[6] = {
@@ -221,7 +213,7 @@ static kc_uint64 s_Truths6[6] = {
     0xF0F0F0F0F0F0F0F0,
     0xFF00FF00FF00FF00,
     0xFFFF0000FFFF0000,
-    0xFFFFFFFF00000000};
+    0xFFFFFFFF0000000};
 static kc_uint64 s_Truths6Neg[6] = {
     0x5555555555555555,
     0x3333333333333333,
@@ -230,84 +222,64 @@ static kc_uint64 s_Truths6Neg[6] = {
     0x0000FFFF0000FFFF,
     0x00000000FFFFFFFF};
 
-static inline void kc_vt_start(kc_vt *v, int cap, int words)
+static inline void kc_vt_const0(kc_vt *v, int ttR)
 {
-    v->size = 0;
-    v->cap = cap;
-    v->words = words;
-    v->ptr = (kc_uint64 *)malloc(8 * v->cap * v->words);
+    kc_uint64 *pR = kc_vt_read(v, ttR);
+    for (int i = 0; i < v->words; i++)
+        pR[i] = 0;
 }
-static inline void kc_vt_start_truth(kc_vt *v, int nvars)
+static inline void kc_vt_const1(kc_vt *v, int ttR)
 {
-    int i, k;
-    v->words = kc_truth_word_num(nvars);
-    v->size = 2 * (nvars + 1);
-    v->cap = 6 * (nvars + 1);
-    v->ptr = (kc_uint64 *)malloc(8 * v->words * v->cap);
-    memset(v->ptr, 0, 8 * v->words);
-    memset(v->ptr + v->words, 0xFF, 8 * v->words);
-    for (i = 0; i < 2 * nvars; i++)
-    {
-        kc_uint64 *tt = v->ptr + (i + 2) * v->words;
-        if (i / 2 < 6)
-            for (k = 0; k < v->words; k++)
-                tt[k] = s_Truths6[i / 2];
-        else
-            for (k = 0; k < v->words; k++)
-                tt[k] = (k & (1 << (i / 2 - 6))) ? ~(kc_uint64)0 : 0;
-        if (i & 1)
-            for (k = 0; k < v->words; k++)
-                tt[k] = ~tt[k];
-        // printf( "lit = %2d  ", i+2 ); kc_vt_print(v, i+2);
-    }
+    kc_uint64 *pR = kc_vt_read(v, ttR);
+    for (int i = 0; i < v->words; i++)
+        pR[i] = ~(kc_uint64)0;
 }
-static inline void kc_vt_stop(kc_vt *v) { free(v->ptr); }
-static inline void kc_vt_dup(kc_vt *vNew, kc_vt *v)
+static inline void kc_vt_var(kc_vt *v, int ttR, int iVar, int nVars)
 {
-    kc_vt_start(vNew, v->cap, v->words);
-    memmove(kc_vt_array(vNew), kc_vt_array(v), 8 * v->size * v->words);
-    vNew->size = v->size;
+    kc_uint64 *pR = kc_vt_read(v, ttR);
+    if (iVar < 6)
+        for (int k = 0; k < v->words; k++)
+            pR[k] = s_Truths6[iVar];
+    else
+        for (int k = 0; k < v->words; k++)
+            pR[k] = (k & (1 << (iVar - 6))) ? ~(kc_uint64)0 : 0;
 }
-
-/*************************************************************
-             Boolean operations on truth tables
-**************************************************************/
-
-static inline int kc_vt_and(kc_vt *v, int ttA, int ttB)
+static inline void kc_vt_dup(kc_vt *v, int ttR, int ttA)
 {
-    kc_uint64 *pF = kc_vt_append(v);
-    int i;
+    kc_uint64 *pR = kc_vt_read(v, ttR);
+    kc_uint64 *pA = kc_vt_read(v, ttA);
+    for (int i = 0; i < v->words; i++)
+        pR[i] = pA[i];
+}
+static inline void kc_vt_inv(kc_vt *v, int ttR, int ttA)
+{
+    kc_uint64 *pR = kc_vt_read(v, ttR);
+    kc_uint64 *pA = kc_vt_read(v, ttA);
+    for (int i = 0; i < v->words; i++)
+        pR[i] = ~pA[i];
+}
+static inline void kc_vt_and(kc_vt *v, int ttR, int ttA, int ttB)
+{
+    kc_uint64 *pR = kc_vt_read(v, ttR);
     kc_uint64 *pA = kc_vt_read(v, ttA);
     kc_uint64 *pB = kc_vt_read(v, ttB);
-    for (i = 0; i < v->words; i++)
-        pF[i] = pA[i] & pB[i];
-    return v->size - 1;
+    for (int i = 0; i < v->words; i++)
+        pR[i] = pA[i] & pB[i];
 }
-static inline int kc_vt_xor(kc_vt *v, int ttA, int ttB)
+static inline void kc_vt_or_xor(kc_vt *v, int ttR, int ttA, int ttB)
 {
-    kc_uint64 *pF = kc_vt_append(v);
-    int i;
+    kc_uint64 *pR = kc_vt_read(v, ttR);
     kc_uint64 *pA = kc_vt_read(v, ttA);
     kc_uint64 *pB = kc_vt_read(v, ttB);
-    for (i = 0; i < v->words; i++)
-        pF[i] = pA[i] ^ pB[i];
-    return v->size - 1;
+    for (int i = 0; i < v->words; i++)
+        pR[i] |= pA[i] ^ pB[i];
 }
-static inline int kc_vt_inv(kc_vt *v, int ttA)
-{
-    kc_uint64 *pF = kc_vt_append(v);
-    int i;
-    kc_uint64 *pA = kc_vt_read(v, ttA);
-    for (i = 0; i < v->words; i++)
-        pF[i] = ~pA[i];
-    return v->size - 1;
-}
+
 static inline int kc_vt_is_equal(kc_vt *v, int ttA, int ttB)
 {
     kc_uint64 *pA = kc_vt_read(v, ttA);
     kc_uint64 *pB = kc_vt_read(v, ttB);
-    int i;
-    for (i = 0; i < v->words; i++)
+    for (int i = 0; i < v->words; i++)
         if (pA[i] != pB[i])
             return 0;
     return 1;
@@ -316,9 +288,8 @@ static inline int kc_vt_is_equal2(kc_vt *vA, int ttA, kc_vt *vB, int ttB)
 {
     kc_uint64 *pA = kc_vt_read(vA, ttA);
     kc_uint64 *pB = kc_vt_read(vB, ttB);
-    int i;
     assert(vA->words == vB->words);
-    for (i = 0; i < vA->words; i++)
+    for (int i = 0; i < vA->words; i++)
         if (pA[i] != pB[i])
             return 0;
     return 1;
@@ -383,21 +354,56 @@ static inline void kc_vt_print2_all(kc_vt *v)
 }
 
 /*************************************************************
+               Initialization of truth tables
+**************************************************************/
+
+static inline void kc_vt_start(kc_vt *v, int cap, int words)
+{
+    v->size = 0;
+    v->cap = cap;
+    v->words = words;
+    v->ptr = (kc_uint64 *)malloc(8 * v->cap * v->words);
+}
+static inline void kc_vt_start_truth(kc_vt *v, int cap, int nvars)
+{
+    assert(cap > 2 * (1 + nvars));
+    v->size = cap;
+    v->cap = cap;
+    v->words = kc_truth_word_num(nvars);
+    v->ptr = (kc_uint64 *)malloc(8 * v->words * v->cap);
+    kc_vt_const0(v, 0);
+    kc_vt_const1(v, 1);
+    for (int ivar = 0; ivar < nvars; ivar++)
+    {
+        kc_vt_var(v, 2 * (1 + ivar) + 0, ivar, nvars);
+        kc_vt_inv(v, 2 * (1 + ivar) + 1, 2 * (1 + ivar) + 0);
+        printf("lit = %2d  ", ivar + 2);
+        kc_vt_print(v, ivar + 2);
+    }
+}
+static inline void kc_vt_stop(kc_vt *v) { free(v->ptr); }
+static inline void kc_vt_dup(kc_vt *vNew, kc_vt *v)
+{
+    kc_vt_start(vNew, v->cap, v->words);
+    memmove(kc_vt_array(vNew), kc_vt_array(v), 8 * v->size * v->words);
+    vNew->size = v->size;
+}
+
+/*************************************************************
                  Gate graph data structure
 **************************************************************/
 
 typedef struct kc_gg_
 {
-    int nins; // the number of primary inputs
-    int size; // the number of objects, including const0, primary inputs, and internal nodes if any
-    int cap;  // the number of objects allocated
-    // int tid;     // the current traversal ID
+    int cap;   // the number of objects allocated
+    int size;  // the number of objects currently present, including const0, primary inputs, and internal nodes if any
+    int nins;  // the number of primary inputs
+    int nouts; // the number of primary outputs
+    int tid;   // the current traversal ID
+
     kc_vi tids;  // the last visited tranversal ID of each object
     kc_vi fans;  // the fanins of objects
-    kc_vi tops;  // the output literals
-    kc_vt funcs; // the truth tables used for temporary cofactoring
-    kc_vt tts;   // the truth tables of each literal (pos and neg polarity of each object)
-    kc_vt outs;  // the primary output function(s) given by the user
+    kc_vt funcs; // the functions of objects
 } kc_gg;
 
 // reading fanins
@@ -406,308 +412,196 @@ static inline int kc_gg_fanin(kc_gg *p, int v, int n)
     assert(n == 0 || n == 1);
     return kc_vi_read(&p->fans, 2 * v + n);
 }
-static inline int kc_gg_is_xor(kc_gg *p, int v) { return kc_gg_fanin(p, v, 0) > kc_gg_fanin(p, v, 1); }
-static inline int kc_gg_is_node(kc_gg *p, int v) { return v >= 1 + p->nins; }
-static inline int kc_gg_is_pi(kc_gg *p, int v) { return v >= 1 && v <= p->nins; }
-static inline int kc_gg_is_const0(kc_gg *p, int v) { return v == 0; }
+
 static inline int kc_gg_pi_num(kc_gg *p) { return p->nins; }
-static inline int kc_gg_po_num(kc_gg *p) { return kc_vt_size(&p->outs); }
-static inline int kc_gg_node_num(kc_gg *p) { return p->size - 1 - p->nins; }
+static inline int kc_gg_po_num(kc_gg *p) { return p->nouts; }
+static inline int kc_gg_obj_num(kc_gg *p) { return p->size; }
+static inline int kc_gg_node_num(kc_gg *p) { return p->size - 1 - p->nins - p->nouts; }
+
+static inline int kc_gg_is_const0(kc_gg *p, int v) { return v == 0; }
+static inline int kc_gg_is_pi(kc_gg *p, int v) { return kc_gg_fanin(p, v, 0) == KC_GG_NULL && kc_gg_fanin(p, v, 1) == KC_GG_NULL && v > 0; }
+static inline int kc_gg_is_po(kc_gg *p, int v) { return kc_gg_fanin(p, v, 0) != KC_GG_NULL && kc_gg_fanin(p, v, 1) == KC_GG_NULL; }
+static inline int kc_gg_is_node(kc_gg *p, int v) { return kc_gg_fanin(p, v, 0) != KC_GG_NULL && kc_gg_fanin(p, v, 1) != KC_GG_NULL; }
 
 // managing traversal IDs
-// static inline int kc_gg_tid_increment(kc_gg *p)
-// {
-//     assert(p->tid < 0x7FFFFFFF);
-//     p->tid++;
-//     return p->tid;
-// }
+static inline int kc_gg_tid_increment(kc_gg *p)
+{
+    assert(p->tid < 0x7FFFFFFF);
+    return p->tid++;
+}
 
-// static inline int kc_gg_tid_is_cur(kc_gg *p, int v) { return kc_vi_read(&p->tids, v) == p->tid; }
-// static inline int kc_gg_tid_set_cur(kc_gg *p, int v)
-// {
-//     kc_vi_write(&p->tids, v, p->tid);
-//     return 1;
-// }
-// static inline int kc_gg_tid_update(kc_gg *p, int v)
-// {
-//     if (kc_gg_tid_is_cur(p, v))
-//         return 0;
-//     return kc_gg_tid_set_cur(p, v);
-// }
+// shift right part array
+static inline void kc_gg_shift(kc_gg *gg, int idx)
+{
+    int lit0, lit1;
+    for (int i = idx + 1; i < gg->size; i++)
+    {
+        lit0 = kc_gg_fanin(gg, i, 0);
+        lit1 = kc_gg_fanin(gg, i, 1);
+        if (i == idx + 1)
+        {
+            kc_vi_write(&gg->fans, 2 * i, 2 * (i - 1));
+            // kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
+        }
+        else
+        {
+            if (kc_gg_is_po(gg, i))
+                kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
+            else
+            {
+                if (!kc_gg_is_pi(gg, kc_l2v(lit0)))
+                    kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
+                if (!kc_gg_is_pi(gg, kc_l2v(lit1)))
+                    kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
+                if (lit0 > 2 * i)
+                    kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
+                if (lit1 > 2 * i)
+                    kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
+            }
+            // printf("hello - ");
+        }
+        printf("(%i, %i)\n", kc_gg_fanin(gg, i, 0), kc_gg_fanin(gg, i, 1));
+    }
+}
+
+// adds one node to the AIG
+static inline int kc_gg_add_obj(kc_gg *p, int lit0, int lit1)
+{
+    int ilast = p->size++;
+    kc_vi_push2(&p->tids, 0, 0);
+    kc_vi_push2(&p->fans, lit0, lit1);
+    p->nins += kc_gg_is_pi(p, ilast);
+    p->nouts += kc_gg_is_po(p, ilast);
+    return 2 * ilast;
+}
+
+// insert one node at idx to the AIG
+static inline void kc_gg_insert_obj(kc_gg *p, int idx, int lit0, int lit1)
+{
+    int ilast = p->size++;
+    kc_vi_push2_idx(&p->tids, 0, 0, idx);
+    kc_vi_push2_idx(&p->fans, lit0, lit1, idx);
+    kc_gg_shift(p, idx / 2);
+    p->nins += kc_gg_is_pi(p, ilast);
+    p->nouts += kc_gg_is_po(p, ilast);
+}
 
 // constructor and destructor
-static inline kc_gg *kc_gg_start(int nins, kc_vt *outs)
+static inline kc_gg *kc_gg_start(int cap)
 {
-    kc_gg *gg = (kc_gg *)malloc(sizeof(kc_gg));
-    gg->nins = nins;
-    gg->size = 1 + nins;
-    gg->cap = MAX_SIZE;
-    // gg->tid = 1;
+    kc_gg *gg = (kc_gg *)calloc(sizeof(kc_gg), 1);
+    gg->cap = cap;
+    gg->tid = 1;
     kc_vi_start(&gg->tids, 2 * gg->cap);
-    kc_vi_fill(&gg->tids, gg->size, 0);
     kc_vi_start(&gg->fans, 2 * gg->cap);
-    kc_vi_fill(&gg->fans, 2 * gg->size, -1);
-    kc_vi_start(&gg->tops, outs->size);
-    kc_vt_start(&gg->funcs, 3 * gg->size, kc_truth_word_num(nins));
-    kc_vt_start_truth(&gg->tts, nins);
-    kc_vt_dup(&gg->outs, outs);
     return gg;
 }
 static inline void kc_gg_stop(kc_gg *gg)
 {
     if (gg == NULL)
         return;
-    kc_vt_stop(&gg->outs);
-    kc_vt_stop(&gg->funcs);
-    kc_vt_stop(&gg->tts);
     kc_vi_stop(&gg->tids);
     kc_vi_stop(&gg->fans);
-    kc_vi_stop(&gg->tops);
+    kc_vt_stop(&gg->funcs);
     free(gg);
 }
-
-// managing internal nodes
-static inline int kc_gg_hash_node(kc_gg *gg, int lit1, int lit2, int ttId)
+static inline void kc_gg_simulate(kc_gg *gg)
 {
-    int i;
-    // compare nodes (structural hashing)
-    for (i = 1 + gg->nins; i < gg->size; i++)
-        if (kc_gg_fanin(gg, i, 0) == lit1 && kc_gg_fanin(gg, i, 1) == lit2)
-            return kc_v2l(i, 0);
-    // compare functions (functional hashing)
-    for (i = 0; i < 2 * gg->size; i++)
-        if (kc_vt_is_equal(&gg->tts, ttId, i))
-            return i;
-    return -1;
+    kc_vt *v = &gg->funcs;
+    kc_vt_start_truth(v, 2 * gg->cap, gg->nins);
+    for (int i = 0; i < gg->size; i++)
+        if (kc_gg_is_node(gg, i))
+        {
+            kc_vt_and(v, 2 * i + 0, kc_gg_fanin(gg, i, 0), kc_gg_fanin(gg, i, 1));
+            kc_vt_inv(v, 2 * i + 1, 2 * i + 0);
+        }
+    // we do not create truth tables for primary outputs
+    // because we will access their functions by looking up
+    // the truth tables for the fanin literals
 }
-static inline int kc_gg_append_node(kc_gg *gg, int lit1, int lit2, int ttId)
+static inline void kc_gg_verify(kc_gg *gg1, kc_gg *gg2)
 {
-    gg->size++;
-    kc_vi_push(&gg->fans, lit1);
-    kc_vi_push(&gg->fans, lit2);
-    kc_vi_push(&gg->tids, 0);
-    kc_vt_inv(&gg->tts, ttId);
-    assert(gg->tts.size == 2 * gg->size); // one truth table for each literal
-    return kc_v2l(gg->size - 1, 0);
+    int i, nFails = 0;
+    assert(kc_gg_po_num(gg1) == kc_gg_po_num(gg2));
+    // confirm that primary outputs are the last objects in each gg
+    for (i = kc_gg_obj_num(gg1) - kc_gg_po_num(gg1); i < kc_gg_obj_num(gg1); i++)
+        assert(kc_gg_is_po(gg1, i));
+    for (i = kc_gg_obj_num(gg2) - kc_gg_po_num(gg2); i < kc_gg_obj_num(gg2); i++)
+        assert(kc_gg_is_po(gg2, i));
+    // compare output functions
+    for (i = 0; i < kc_gg_po_num(gg1); i++)
+    {
+        int obj1 = kc_gg_obj_num(gg1) - kc_gg_po_num(gg1) + i;
+        int obj2 = kc_gg_obj_num(gg2) - kc_gg_po_num(gg2) + i;
+        if (!kc_vt_is_equal2(&gg1->funcs, kc_gg_fanin(gg1, obj1, 0),
+                             &gg2->funcs, kc_gg_fanin(gg2, obj2, 0)))
+            printf("Verification failed for output %d.", i), nFails++;
+    }
+    if (nFails == 0)
+        printf("Verification successful!\n");
+    else
+        printf("Verification failed for %d outputs.\n", nFails);
 }
-
-// managing internal functions
-static inline int kc_gg_hash_function(kc_gg *gg, int ttId)
-{
-    int i;
-    for (i = 0; i < 2 * gg->size; i++)
-        if (kc_vt_is_equal2(&gg->tts, i, &gg->funcs, ttId))
-            return i;
-    return -1;
-}
-
-// Boolean operations
-static inline int kc_gg_and(kc_gg *gg, int lit1, int lit2)
-{
-    if (lit1 == 0)
-        return 0;
-    if (lit2 == 0)
-        return 0;
-    if (lit1 == 1)
-        return lit2;
-    if (lit2 == 1)
-        return lit1;
-    if (lit1 == lit2)
-        return lit1;
-    if ((lit1 ^ lit2) == 1)
-        return 0;
-    if (lit1 > lit2)
-        KC_SWAP(int, lit1, lit2)
-    assert(lit1 < lit2);
-    int ttId = kc_vt_and(&gg->tts, lit1, lit2);
-    int lit = kc_gg_hash_node(gg, lit1, lit2, ttId);
-    if (lit == -1)
-        return kc_gg_append_node(gg, lit1, lit2, ttId);
-    kc_vt_resize(&gg->tts, ttId);
-    return lit;
-}
-static inline int kc_gg_xor(kc_gg *gg, int lit1, int lit2)
-{
-    if (lit1 == 1)
-        return (lit2 ^ 1);
-    if (lit2 == 1)
-        return (lit1 ^ 1);
-    if (lit1 == 0)
-        return lit2;
-    if (lit2 == 0)
-        return lit1;
-    if (lit1 == lit2)
-        return 0;
-    if ((lit1 ^ lit2) == 1)
-        return 1;
-    if (lit1 < lit2)
-        KC_SWAP(int, lit1, lit2)
-    assert(lit1 > lit2);
-    int ttId = kc_vt_xor(&gg->tts, lit1, lit2);
-    int lit = kc_gg_hash_node(gg, lit1, lit2, ttId);
-    if (lit == -1)
-        return kc_gg_append_node(gg, lit1, lit2, ttId);
-    kc_vt_resize(&gg->tts, ttId);
-    return lit;
-}
-static inline int kc_gg_or(kc_gg *gg, int lit1, int lit2) { return kc_lnot(kc_gg_and(gg, kc_lnot(lit1), kc_lnot(lit2))); }
-static inline int kc_gg_mux(kc_gg *gg, int ctrl, int lit1, int lit0) { return kc_gg_or(gg, kc_gg_and(gg, ctrl, lit1), kc_gg_and(gg, kc_lnot(ctrl), lit0)); }
-static inline int kc_gg_and_xor(kc_gg *gg, int ctrl, int lit1, int lit0) { return kc_gg_xor(gg, kc_gg_and(gg, ctrl, lit1), lit0); }
-
-// counting nodes
-// int kc_gg_node_count_rec(kc_gg *gg, int lit)
-// {
-//     int res = 1, var = kc_l2v(lit);
-//     if (var <= gg->nins || !kc_gg_tid_update(gg, var))
-//         return 0;
-//     res += kc_gg_node_count_rec(gg, kc_vi_read(&gg->fans, lit));
-//     res += kc_gg_node_count_rec(gg, kc_vi_read(&gg->fans, kc_lnot(lit)));
-//     return res;
-// }
-// int kc_gg_node_count1(kc_gg *gg, int lit)
-// {
-//     kc_gg_tid_increment(gg);
-//     return kc_gg_node_count_rec(gg, lit);
-// }
-// int kc_gg_node_count2(kc_gg *gg, int lit0, int lit1)
-// {
-//     kc_gg_tid_increment(gg);
-//     return kc_gg_node_count_rec(gg, lit0) + kc_gg_node_count_rec(gg, lit1);
-// }
-// int kc_gg_node_count(kc_gg *gg)
-// {
-//     int i, top, Count = 0;
-//     kc_gg_tid_increment(gg);
-//     kc_vi_for_each_entry(&gg->tops, top, i)
-//         Count += kc_gg_node_count_rec(gg, top);
-//     return Count;
-// }
-
-// // counting levels
-// int kc_gg_level_rec(kc_gg *gg, int *levs, int lit)
-// {
-//     int res0, res1, var = kc_l2v(lit);
-//     if (var <= gg->nins || !kc_gg_tid_update(gg, var))
-//         return levs[var];
-//     res0 = kc_gg_level_rec(gg, levs, kc_vi_read(&gg->fans, lit));
-//     res1 = kc_gg_level_rec(gg, levs, kc_vi_read(&gg->fans, kc_lnot(lit)));
-//     return (levs[var] = 1 + kc_max(res0, res1));
-// }
-// int kc_gg_level(kc_gg *gg)
-// {
-//     int i, top, levMax = 0;
-//     int *levs = (int *)calloc(sizeof(int), gg->size);
-//     kc_gg_tid_increment(gg);
-//     kc_vi_for_each_entry(&gg->tops, top, i)
-//         levMax = kc_max(levMax, kc_gg_level_rec(gg, levs, top));
-//     free(levs);
-//     return levMax;
-// }
 
 // printing the graph
-void kc_gg_print_lit(int lit, int nVars)
+void kc_gg_print_lit(kc_gg *gg, int lit)
 {
     assert(lit >= 0);
+    assert(!kc_gg_is_po(gg, kc_l2v(lit)));
     if (lit < 2)
         printf("%d", lit);
-    else if (lit < 2 * (nVars + 1))
-        printf("%s%c", kc_l2c(lit) ? "~" : "", (char)(96 + kc_l2v(lit)));
+    else if (kc_gg_is_pi(gg, kc_l2v(lit)))
+        printf("%s%c", kc_l2c(lit) ? "~" : "", (char)('a' - 1 + kc_l2v(lit)));
     else
         printf("%s%02d", kc_l2c(lit) ? "~n" : "n", kc_l2v(lit));
 }
 void kc_gg_print(kc_gg *gg, int verbose)
 {
-    int fPrintGraphs = verbose;
-    int fPrintTruths = gg->nins <= 8;
-    int i, top, nLevels, nCount[2] = {0};
-    // if (!fPrintGraphs)
-    // {
-    //     printf("The graph contains %d nodes and spans %d levels.\n", kc_gg_node_count(gg), kc_gg_level(gg));
-    //     return;
-    // }
-    // mark used nodes with the new travId
-    // nLevels = kc_gg_level(gg);
-    // print const and inputs
-    if (fPrintTruths)
-        kc_vt_print_int(&gg->tts, 0), printf(" ");
-    printf("n%02d = 0\n", 0);
-    for (i = 1; i <= gg->nins; i++)
+    int i, nIns = 0, nOuts = 0, nAnds = 0;
+    for (i = 0; i < gg->size; i++)
     {
-        if (fPrintTruths)
-            kc_vt_print_int(&gg->tts, 2 * i), printf(" ");
-        printf("n%02d = %c\n", i, (char)(96 + i));
-    }
-    // print used nodes
-    int count = 1;
-    for (i = gg->nins + 1; i < gg->size; i++)
-        // if (kc_gg_tid_is_cur(gg, i))
-        // {
-        printf("%d ", count++);
-    if (fPrintTruths)
-        kc_vt_print_int(&gg->tts, 2 * i), printf(" ");
-    printf("n%02d = ", i);
-    kc_gg_print_lit(kc_gg_fanin(gg, i, 0), gg->nins);
-
-    printf(" %c ", kc_gg_is_xor(gg, i) ? '^' : '&');
-    kc_gg_print_lit(kc_gg_fanin(gg, i, 1), gg->nins);
-    printf("\n");
-    nCount[kc_gg_is_xor(gg, i)]++;
-    // }
-    // print outputs
-    kc_vi_for_each_entry(&gg->tops, top, i)
-    {
-        if (fPrintTruths)
-            kc_vt_print_int(&gg->tts, top), printf(" ");
-        printf("po%d = ", i);
-        kc_gg_print_lit(top, gg->nins);
+        printf("Obj%02d : ", i);
+        if (kc_gg_is_const0(gg, i))
+            printf("const0");
+        else if (kc_gg_is_pi(gg, i))
+            printf("i%02d = %c", nIns, (char)('a' - 1 + i)), nIns++;
+        else if (kc_gg_is_po(gg, i))
+            printf("o%02d = ", nOuts), kc_gg_print_lit(gg, kc_gg_fanin(gg, i, 0)), nOuts++;
+        else // internal node
+            printf("n%02d = ", i), kc_gg_print_lit(gg, kc_gg_fanin(gg, i, 0)), printf(" & "), kc_gg_print_lit(gg, kc_gg_fanin(gg, i, 1)), nAnds++;
         printf("\n");
     }
-    printf("The graph contains %d nodes (%d ands and %d xors)",
-           nCount[0] + nCount[1], nCount[0], nCount[1]);
+    assert(nIns == kc_gg_pi_num(gg));
+    assert(nOuts == kc_gg_po_num(gg));
+    assert(nAnds == kc_gg_node_num(gg));
+    printf("The graph contains %d inputs, %d outputs, and %d internal and-nodes.\n", nIns, nOuts, nAnds);
 }
 
-// duplicates AIG while only copying used nodes (also expands xors into ands as needed)
-kc_gg *kc_gg_dup(kc_gg *gg, int only_and)
+// duplicates AIG
+kc_gg *kc_gg_dup(kc_gg *gg)
 {
-    kc_gg *ggNew = kc_gg_start(gg->nins, &gg->outs);
-    int i, top, *pCopy = (int *)calloc(sizeof(int), 2 * gg->size);
-    for (i = 0; i < 2 * (1 + gg->nins); i++)
-        pCopy[i] = i;
-    for (i = 1 + gg->nins; i < gg->size; i++)
+    kc_gg *ggNew = kc_gg_start(gg->cap);
+    int *pCopy = (int *)malloc(sizeof(int) * 2 * gg->size);
+    for (int i = 0; i < gg->size; i++)
     {
-        // if (kc_gg_tid_is_cur(gg, i))
-        // {
-        int lit0 = kc_gg_fanin(gg, i, 0);
-        int lit1 = kc_gg_fanin(gg, i, 1);
-        if (!kc_gg_is_xor(gg, i))
-            pCopy[2 * i] = kc_gg_and(ggNew, pCopy[lit0], pCopy[lit1]);
-        else if (only_and)
-            pCopy[2 * i] = kc_gg_mux(ggNew, pCopy[lit0], kc_lnot(pCopy[lit1]), pCopy[lit1]);
-        else
-            pCopy[2 * i] = kc_gg_xor(ggNew, pCopy[lit0], pCopy[lit1]);
+        if (kc_gg_is_const0(gg, i))
+            pCopy[2 * i] = kc_gg_add_obj(ggNew, KC_GG_NULL, KC_GG_NULL);
+        else if (kc_gg_is_pi(gg, i))
+            pCopy[2 * i] = kc_gg_add_obj(ggNew, KC_GG_NULL, KC_GG_NULL);
+        else if (kc_gg_is_po(gg, i))
+            pCopy[2 * i] = kc_gg_add_obj(ggNew, pCopy[kc_gg_fanin(gg, i, 0)], KC_GG_NULL);
+        else // internal node
+            pCopy[2 * i] = kc_gg_add_obj(ggNew, pCopy[kc_gg_fanin(gg, i, 0)], pCopy[kc_gg_fanin(gg, i, 1)]);
         pCopy[2 * i + 1] = kc_lnot(pCopy[2 * i]);
-        // }
     }
-    kc_vi_for_each_entry(&gg->tops, top, i)
-        kc_vi_push(&ggNew->tops, pCopy[top]);
     free(pCopy);
     return ggNew;
-}
-
-// compares truth tables against the specification
-void kc_gg_verify(kc_gg *gg)
-{
-    int i, top, nFailed = 0;
-    kc_vi_for_each_entry(&gg->tops, top, i) if (!kc_vt_is_equal2(&gg->outs, i, &gg->tts, top))
-        printf("Verification failed for output %d.\n", i),
-        nFailed++;
-    if (nFailed == 0)
-        printf("Verification succeeded.  ");
 }
 
 /*************************************************************
                     AIGER interface
 **************************************************************/
+
 static unsigned kc_gg_aiger_read_uint(FILE *pFile)
 {
     unsigned x = 0, i = 0;
@@ -717,7 +611,7 @@ static unsigned kc_gg_aiger_read_uint(FILE *pFile)
     return x | (ch << (7 * i));
 }
 
-static int *kc_aiger_read(char *pFileName, int *pnObjs, int *pnIns, int *pnLatches, int *pnOuts, int *pnAnds, kc_vt *outs)
+static int *kc_aiger_read(char *pFileName, int *pnObjs, int *pnIns, int *pnLatches, int *pnOuts, int *pnAnds)
 {
     int i, Temp, nTotal, nObjs, nIns, nLatches, nOuts, nAnds, *pObjs, *pOuts;
     FILE *pFile = fopen(pFileName, "rb");
@@ -746,7 +640,6 @@ static int *kc_aiger_read(char *pFileName, int *pnObjs, int *pnIns, int *pnLatch
     }
     nObjs = 1 + nIns + 2 * nLatches + nOuts + nAnds;
     pObjs = (int *)calloc(sizeof(int), 2 * nObjs);
-    pOuts = (int *)calloc(sizeof(int), 2 * nOuts);
     for (i = 0; i <= nIns + nLatches; i++)
         pObjs[2 * i] = pObjs[2 * i + 1] = KC_GG_NULL;
 
@@ -755,7 +648,8 @@ static int *kc_aiger_read(char *pFileName, int *pnObjs, int *pnIns, int *pnLatch
     {
         while (fgetc(pFile) != '\n')
             ;
-        fscanf(pFile, "%d", &Temp);
+        int value = fscanf(pFile, "%d", &Temp);
+        assert(value == 1);
         pObjs[2 * (nObjs - nLatches + i) + 0] = Temp;
         pObjs[2 * (nObjs - nLatches + i) + 1] = KC_GG_NULL;
     }
@@ -764,11 +658,10 @@ static int *kc_aiger_read(char *pFileName, int *pnObjs, int *pnIns, int *pnLatch
     {
         while (fgetc(pFile) != '\n')
             ;
-        fscanf(pFile, "%d", &Temp);
+        int value = fscanf(pFile, "%d", &Temp);
+        assert(value == 1);
         pObjs[2 * (nObjs - nOuts - nLatches + i) + 0] = Temp;
-        pObjs[2 * (nObjs - nOuts - nLatches + i) + 1] = Temp;
-        pOuts[2 * i + 0] = Temp;
-        pOuts[2 * i + 1] = Temp;
+        pObjs[2 * (nObjs - nOuts - nLatches + i) + 1] = KC_GG_NULL;
     }
     // read the binary part
     while (fgetc(pFile) != '\n')
@@ -796,21 +689,15 @@ static int *kc_aiger_read(char *pFileName, int *pnObjs, int *pnIns, int *pnLatch
 }
 static kc_gg *kc_gg_aiger_read(char *pFileName, int fVerbose)
 {
-
-    kc_vt Outs, *outs = &Outs;
-    int nObjs, nIns, nLatches, nOuts, nAnds, *pObjs = kc_aiger_read(pFileName, &nObjs, &nIns, &nLatches, &nOuts, &nAnds, outs);
+    int i, nObjs, nIns, nLatches, nOuts, nAnds, *pObjs = kc_aiger_read(pFileName, &nObjs, &nIns, &nLatches, &nOuts, &nAnds);
     if (pObjs == NULL)
         return NULL;
-
-    kc_gg *p = kc_gg_start(nIns, outs);
-    p->cap = 2 * nObjs;
-    p->size = 2 * nObjs;
-    // p->nRegs  = nLatches;
-    for (int i = 0; i < nObjs; i++)
-        kc_vi_push(&p->fans, pObjs[i]);
-    // p->fans = pObjs;
+    kc_gg *p = kc_gg_start(3 * nObjs);
+    for (i = 0; i < nObjs; i++)
+        kc_gg_add_obj(p, pObjs[2 * i + 0], pObjs[2 * i + 1]);
     if (fVerbose)
-        printf("Loaded MiniAIG from the AIGER file \"%s\".\n", pFileName);
+        printf("Loaded AIG from the AIGER file \"%s\".\n", pFileName);
+    kc_gg_print(p, fVerbose);
     return p;
 }
 
@@ -826,21 +713,27 @@ static void kc_aiger_write_uint(FILE *pFile, unsigned x)
     ch = x;
     fputc(ch, pFile);
 }
-static void kc_aiger_write(char *pFileName, int *pObjs, int nObjs, int nIns, int nLatches, int nOuts, int nAnds, int *pOuts)
+static void kc_aiger_write(char *pFileName, int *pObjs, int nObjs, int nIns, int nLatches, int nOuts, int nAnds)
 {
-    std::string str(pFileName);
-    FILE *pFile = fopen(("./outputs/" + str).c_str(), "wb");
+    FILE *pFile = fopen(pFileName, "wb");
     int i;
     if (pFile == NULL)
     {
         fprintf(stdout, "kc_aiger_write(): Cannot open the output file \"%s\".\n", pFileName);
         return;
     }
+    // make sure the last objects are latches
+    for (i = 0; i < nLatches; i++)
+        assert(pObjs[2 * (nObjs - nLatches + i) + 1] == KC_GG_NULL);
+    // make sure the objects before latches are outputs
+    for (i = 0; i < nOuts; i++)
+        assert(pObjs[2 * (nObjs - nOuts - nLatches + i) + 1] == KC_GG_NULL);
+
     fprintf(pFile, "aig %d %d %d %d %d\n", nIns + nLatches + nAnds, nIns, nLatches, nOuts, nAnds);
     for (i = 0; i < nLatches; i++)
-        fprintf(pFile, "%d\n", pOuts[nOuts + i]);
+        fprintf(pFile, "%d\n", pObjs[2 * (nObjs - nLatches + i) + 0]);
     for (i = 0; i < nOuts; i++)
-        fprintf(pFile, "%d\n", pOuts[i]);
+        fprintf(pFile, "%d\n", pObjs[2 * (nObjs - nOuts - nLatches + i) + 0]);
     for (i = 0; i < nAnds; i++)
     {
         int uLit = 2 * (1 + nIns + nLatches + i);
@@ -854,9 +747,9 @@ static void kc_aiger_write(char *pFileName, int *pObjs, int nObjs, int nIns, int
 }
 static void kc_gg_aiger_write(char *pFileName, kc_gg *gg, int fVerbose)
 {
-    kc_gg *ggNew = kc_gg_dup(gg, 1);
-    // kc_gg_print( ggNew, fVerbose );
-    kc_aiger_write(pFileName, kc_vi_array(&ggNew->fans), -1, kc_gg_pi_num(ggNew), 0, kc_gg_po_num(ggNew), kc_gg_node_num(ggNew), kc_vi_array(&ggNew->tops));
+    kc_gg *ggNew = kc_gg_dup(gg);
+    kc_gg_print(ggNew, fVerbose);
+    kc_aiger_write(pFileName, kc_vi_array(&ggNew->fans), kc_vi_size(&ggNew->fans) / 2, kc_gg_pi_num(ggNew), 0, kc_gg_po_num(ggNew), kc_gg_node_num(ggNew));
     if (fVerbose)
         printf("Written graph with %d inputs, %d outputs, and %d and-nodes into AIGER file \"%s\".\n",
                kc_gg_pi_num(ggNew), kc_gg_po_num(ggNew), kc_gg_node_num(ggNew), pFileName);
@@ -886,41 +779,72 @@ extern "C"
     - implement top_level function that will add nodes nAdds times and verify new circuit and after completion it
     will delete nodes while it is possible (it'll be impossible if we can't delete any node).
     - implement addNode function that will insert node to specific location of graph by resizing graph and moving right
-    part of it. To insert node
+    part of it.
     */
     // solving one instance of a problem
-    int kc_top_level_call(char *fileName, int nAdds, int verbose)
+    int kc_top_level_call(char *pFileNameIn, int nadds, int verbose)
     {
         clock_t clkStart = clock();
-        kc_vt Outs, *outs = &Outs;
-        int i, j, iChange, iDelete, iCand;
-        int start = (2*(gg->nins + 1) + 1);
-        kc_gg *gg = kc_gg_aiger_read(fileName, verbose);
-        kc_gg *ggReverse;
-        
-        for (i = 0; i < nAdds;) {
-            for (j = start; j < gg->size; j++) {
-                iChange = start + Num % (gg->size - start);
-                iCand = 2 + Num % ((iChange - 2) - 2);
-                ggReverse = gg;
-                kc_gg_add_node(gg, iChange, iCand);
-                if (!kc_gg_is_correct(gg))
-                    kc_gg_reverse(gg, ggReverse);
-                else
-                    i++;
-            }
+        int iChange, iDelete, iCand;
+        kc_gg *gg = kc_gg_aiger_read(pFileNameIn, 1);
+        kc_gg *ggCopy;
+        if (gg == NULL)
+            return 0;
+        printf("Finished reading input file \"%s\".\n", pFileNameIn);
+        int start = (gg->nins + 1);
+        for (int j = 0; j < gg->size; j++)
+        {
+            printf("(%i, %i) ", kc_gg_fanin(gg, j, 0), kc_gg_fanin(gg, j, 1));
         }
-        while (kc_gg_can_delete_node(gg)) {
-            for (j = start; j < gg->size; j++) {
-                iDelete = start + Num % (gg->size - start);
-                iCand = 2 + Num % ((iChange - 2) - 2);
-                ggReverse = gg;
-                kc_gg_delete_node(gg, iDelete, iCand);
-                if (!kc_gg_is_correct(gg))
-                    kc_gg_reverse(gg, ggReverse);
+        printf("\n\n");
+        for (int i = 0; i < nadds; i++)
+        {
+            iChange = start + (Num % (gg->size - start));
+            iCand = 2 + Num % ((2 * iChange - 2) - 2);
+            ggCopy = kc_gg_dup(gg);
+            printf("(%i, %i)\n", kc_gg_fanin(gg, iChange, 0), iCand);
+            kc_gg_insert_obj(gg, 2 * iChange, kc_gg_fanin(gg, iChange, 0), iCand);
+            for (int j = 0; j < gg->size; j++)
+            {
+                printf("(%i, %i) ", kc_gg_fanin(gg, j, 0), kc_gg_fanin(gg, j, 1));
             }
+            printf("\n\n");
+            // kc_gg_simulate(gg);
         }
-        
+
+        /* pseudocode for the whole procedure
+
+            int start = (2 * (gg->nins + 1) + 1);
+            kc_gg *gg = kc_gg_aiger_read(fileName, verbose);
+            kc_gg *ggReverse;
+
+            for (i = 0; i < nAdds;)
+            {
+                for (j = start; j < gg->size; j++)
+                {
+                    iChange = start + Num % (gg->size - start);
+                    iCand = 2 + Num % ((iChange - 2) - 2);
+                    ggReverse = gg;
+                    kc_gg_add_node(gg, iChange, iCand);
+                    if (!kc_gg_is_correct(gg))
+                        kc_gg_reverse(gg, ggReverse);
+                    else
+                        i++;
+                }
+            }
+            while (kc_gg_can_delete_node(gg))
+            {
+                for (j = start; j < gg->size; j++)
+                {
+                    iDelete = start + Num % (gg->size - start);
+                    iCand = 2 + Num % ((iChange - 2) - 2);
+                    ggReverse = gg;
+                    kc_gg_delete_node(gg, iDelete, iCand);
+                    if (!kc_gg_is_correct(gg))
+                        kc_gg_reverse(gg, ggReverse);
+                }
+            }
+        */
         return 1;
     }
 }
@@ -931,9 +855,29 @@ extern "C"
 
 int main(int argc, char **argv)
 {
-    char *input = "../rec-synthesis/outputs/80.aig";
-    char *output = "80-tested.aig";
-    kc_gg_aiger_test(input, output);
+
+    char *input = (char *)"../rec-synthesis/outputs/80.aig";
+    char *output = (char *)"test_out.aig";
+
+    // kc_gg_aiger_test(input, output);
+
+    if (argc == 1)
+    {
+        printf("usage:  %s <int> [-v] <string>\n", argv[0]);
+        printf("        this program synthesized circuits from truth tables\n");
+        printf("     <int> : how many nodes to add before trying to delete\n");
+        printf("        -v : enables verbose output\n");
+        printf("  <string> : a truth table in hex notation or a file name\n");
+        return 1;
+    }
+    else
+    {
+        int nAdds = 0;
+        int verbose = 0;
+
+        // printf((argv[argc - 1]), "\n");
+        kc_top_level_call(input, 10, 1);
+    }
 }
 
 /*************************************************************
