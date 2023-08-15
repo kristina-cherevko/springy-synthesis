@@ -92,6 +92,7 @@ static inline int kc_vi_read(kc_vi *v, int k)
 static inline void kc_vi_write(kc_vi *v, int k, int e)
 {
     assert(k < v->size);
+    // printf("hello index %i value %i\n", k, v->ptr[k]);
     v->ptr[k] = e;
 }
 static inline int kc_vi_size(kc_vi *v) { return v->size; }
@@ -137,6 +138,23 @@ static inline void kc_vi_push_idx(kc_vi *v, int e, int idx)
         v->ptr[j + 1] = v->ptr[j];
     // shift procedure kc_vi_shift(v, idx);
     v->ptr[idx] = e;
+}
+// delete node
+static inline void kc_vi_delete_idx(kc_vi *v, int idx)
+{
+    v->ptr[idx] = 1;
+    // for (int j = 2 * idx; j < v->size - 1; j++)
+    //     v->ptr[j] = v->ptr[j + 1];
+    // kc_vi_resize(v, v->size - 1);
+
+    // for (j = 0; j < v->size; j++)
+    //     if (v->ptr[j] == e)
+    //         break;
+    // if (j == v->size)
+    //     return 0;
+    // for (; j < v->size - 1; j++)
+    //     v->ptr[j] = v->ptr[j + 1];
+    // kc_vi_resize(v, v->size - 1);
 }
 static inline void kc_vi_push2(kc_vi *v, int e1, int e2)
 {
@@ -377,8 +395,8 @@ static inline void kc_vt_start_truth(kc_vt *v, int cap, int nvars)
     {
         kc_vt_var(v, 2 * (1 + ivar) + 0, ivar, nvars);
         kc_vt_inv(v, 2 * (1 + ivar) + 1, 2 * (1 + ivar) + 0);
-        printf("lit = %2d  ", ivar + 2);
-        kc_vt_print(v, ivar + 2);
+        // printf("lit = %2d  ", ivar + 2);
+        // kc_vt_print(v, ivar + 2);
     }
 }
 static inline void kc_vt_stop(kc_vt *v) { free(v->ptr); }
@@ -438,29 +456,28 @@ static inline void kc_gg_shift(kc_gg *gg, int idx)
     {
         lit0 = kc_gg_fanin(gg, i, 0);
         lit1 = kc_gg_fanin(gg, i, 1);
-        if (i == idx + 1)
-        {
-            kc_vi_write(&gg->fans, 2 * i, 2 * (i - 1));
-            // kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
-        }
+        if (kc_gg_is_po(gg, i))
+            kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
         else
         {
-            if (kc_gg_is_po(gg, i))
-                kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
+            if (i == idx + 1)
+            {
+                kc_vi_write(&gg->fans, 2 * i, 2 * (i - 1));
+                if (!kc_gg_is_pi(gg, kc_l2v(lit1)) && (lit1 > 2 * i + 1))
+                    kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
+            }
             else
             {
                 if (!kc_gg_is_pi(gg, kc_l2v(lit0)))
                     kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
                 if (!kc_gg_is_pi(gg, kc_l2v(lit1)))
                     kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
-                if (lit0 > 2 * i)
+                if (lit0 > 2 * i + 1)
                     kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
-                if (lit1 > 2 * i)
+                if (lit1 > 2 * i + 1)
                     kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
             }
-            // printf("hello - ");
         }
-        printf("(%i, %i)\n", kc_gg_fanin(gg, i, 0), kc_gg_fanin(gg, i, 1));
     }
 }
 
@@ -478,12 +495,21 @@ static inline int kc_gg_add_obj(kc_gg *p, int lit0, int lit1)
 // insert one node at idx to the AIG
 static inline void kc_gg_insert_obj(kc_gg *p, int idx, int lit0, int lit1)
 {
-    int ilast = p->size++;
+    p->size++;
     kc_vi_push2_idx(&p->tids, 0, 0, idx);
     kc_vi_push2_idx(&p->fans, lit0, lit1, idx);
     kc_gg_shift(p, idx / 2);
-    p->nins += kc_gg_is_pi(p, ilast);
-    p->nouts += kc_gg_is_po(p, ilast);
+    p->nins += kc_gg_is_pi(p, idx / 2);
+    p->nouts += kc_gg_is_po(p, idx / 2);
+}
+
+// delete one node at idx to the AIG
+static inline void kc_gg_delete_obj(kc_gg *p, int idx)
+{
+    p->nins -= kc_gg_is_pi(p, idx / 2);
+    p->nouts -= kc_gg_is_po(p, idx / 2);
+    kc_vi_delete_idx(&p->tids, idx);
+    kc_vi_delete_idx(&p->fans, idx);
 }
 
 // constructor and destructor
@@ -519,7 +545,8 @@ static inline void kc_gg_simulate(kc_gg *gg)
     // because we will access their functions by looking up
     // the truth tables for the fanin literals
 }
-static inline void kc_gg_verify(kc_gg *gg1, kc_gg *gg2)
+
+static inline bool kc_gg_verify(kc_gg *gg1, kc_gg *gg2)
 {
     int i, nFails = 0;
     assert(kc_gg_po_num(gg1) == kc_gg_po_num(gg2));
@@ -538,9 +565,15 @@ static inline void kc_gg_verify(kc_gg *gg1, kc_gg *gg2)
             printf("Verification failed for output %d.", i), nFails++;
     }
     if (nFails == 0)
+    {
         printf("Verification successful!\n");
+        return 1;
+    }
     else
+    {
         printf("Verification failed for %d outputs.\n", nFails);
+        return 0;
+    }
 }
 
 // printing the graph
@@ -773,78 +806,48 @@ static void kc_gg_aiger_test(char *pFileNameIn, char *pFileNameOut)
 
 extern "C"
 {
-    /*
-    TO solve the problem I need:
-    - read circuit from AIG file and create a graph structure in my environment.
-    - implement top_level function that will add nodes nAdds times and verify new circuit and after completion it
-    will delete nodes while it is possible (it'll be impossible if we can't delete any node).
-    - implement addNode function that will insert node to specific location of graph by resizing graph and moving right
-    part of it.
-    */
-    // solving one instance of a problem
     int kc_top_level_call(char *pFileNameIn, int nadds, int verbose)
     {
         clock_t clkStart = clock();
         int iChange, iDelete, iCand;
         kc_gg *gg = kc_gg_aiger_read(pFileNameIn, 1);
         kc_gg *ggCopy;
+        kc_gg *ggCopy2;
         if (gg == NULL)
             return 0;
         printf("Finished reading input file \"%s\".\n", pFileNameIn);
+        printf("\n\n Starting insertion\n\n");
         int start = (gg->nins + 1);
-        for (int j = 0; j < gg->size; j++)
+        for (int i = 0; i < nadds;)
         {
-            printf("(%i, %i) ", kc_gg_fanin(gg, j, 0), kc_gg_fanin(gg, j, 1));
-        }
-        printf("\n\n");
-        for (int i = 0; i < nadds; i++)
-        {
+            ggCopy = kc_gg_dup(gg);
             iChange = start + (Num % (gg->size - start));
             iCand = 2 + Num % ((2 * iChange - 2) - 2);
-            ggCopy = kc_gg_dup(gg);
-            printf("(%i, %i)\n", kc_gg_fanin(gg, iChange, 0), iCand);
             kc_gg_insert_obj(gg, 2 * iChange, kc_gg_fanin(gg, iChange, 0), iCand);
-            for (int j = 0; j < gg->size; j++)
-            {
-                printf("(%i, %i) ", kc_gg_fanin(gg, j, 0), kc_gg_fanin(gg, j, 1));
-            }
-            printf("\n\n");
-            // kc_gg_simulate(gg);
+            kc_gg_simulate(gg);
+            kc_gg_simulate(ggCopy);
+            if (!kc_gg_verify(gg, ggCopy))
+                gg = kc_gg_dup(ggCopy);
+            else
+                i++;
+            
         }
-
-        /* pseudocode for the whole procedure
-
-            int start = (2 * (gg->nins + 1) + 1);
-            kc_gg *gg = kc_gg_aiger_read(fileName, verbose);
-            kc_gg *ggReverse;
-
-            for (i = 0; i < nAdds;)
-            {
-                for (j = start; j < gg->size; j++)
-                {
-                    iChange = start + Num % (gg->size - start);
-                    iCand = 2 + Num % ((iChange - 2) - 2);
-                    ggReverse = gg;
-                    kc_gg_add_node(gg, iChange, iCand);
-                    if (!kc_gg_is_correct(gg))
-                        kc_gg_reverse(gg, ggReverse);
-                    else
-                        i++;
-                }
-            }
-            while (kc_gg_can_delete_node(gg))
-            {
-                for (j = start; j < gg->size; j++)
-                {
-                    iDelete = start + Num % (gg->size - start);
-                    iCand = 2 + Num % ((iChange - 2) - 2);
-                    ggReverse = gg;
-                    kc_gg_delete_node(gg, iDelete, iCand);
-                    if (!kc_gg_is_correct(gg))
-                        kc_gg_reverse(gg, ggReverse);
-                }
-            }
-        */
+        kc_gg_print(gg, 1);
+        
+        printf("\n\n Starting deletion\n\n");
+        for (int i = 0; i < gg->size + nadds;)
+        {
+            ggCopy2 = kc_gg_dup(gg);
+            iDelete = 2 * start + (Num % (2 * gg->size - 2 * start - 2 * gg->nouts));
+            kc_gg_delete_obj(gg, iDelete);
+            kc_gg_simulate(gg);
+            kc_gg_simulate(ggCopy2);
+            if (!kc_gg_verify(gg, ggCopy2))
+                gg = kc_gg_dup(ggCopy2);
+            else
+                i++;
+        }
+        kc_gg_print(gg, 1);
         return 1;
     }
 }
@@ -856,7 +859,7 @@ extern "C"
 int main(int argc, char **argv)
 {
 
-    char *input = (char *)"../rec-synthesis/outputs/80.aig";
+    char *input = (char *)"../rec-synthesis/outputs/test.aig";
     char *output = (char *)"test_out.aig";
 
     // kc_gg_aiger_test(input, output);
@@ -874,9 +877,7 @@ int main(int argc, char **argv)
     {
         int nAdds = 0;
         int verbose = 0;
-
-        // printf((argv[argc - 1]), "\n");
-        kc_top_level_call(input, 10, 1);
+        kc_top_level_call(argv[argc - 1], 5, 1);
     }
 }
 
