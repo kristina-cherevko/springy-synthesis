@@ -135,7 +135,9 @@ static inline void kc_vi_push_idx(kc_vi *v, int e, int idx)
     kc_vi_grow(v);
     v->size++;
     for (int j = v->size - 1; j >= idx; j--)
+    {
         v->ptr[j + 1] = v->ptr[j];
+    }
     // shift procedure kc_vi_shift(v, idx);
     v->ptr[idx] = e;
 }
@@ -143,28 +145,19 @@ static inline void kc_vi_push_idx(kc_vi *v, int e, int idx)
 static inline void kc_vi_delete_idx(kc_vi *v, int idx)
 {
     v->ptr[idx] = 1;
-    // for (int j = 2 * idx; j < v->size - 1; j++)
-    //     v->ptr[j] = v->ptr[j + 1];
-    // kc_vi_resize(v, v->size - 1);
-
-    // for (j = 0; j < v->size; j++)
-    //     if (v->ptr[j] == e)
-    //         break;
-    // if (j == v->size)
-    //     return 0;
-    // for (; j < v->size - 1; j++)
-    //     v->ptr[j] = v->ptr[j + 1];
-    // kc_vi_resize(v, v->size - 1);
 }
 static inline void kc_vi_push2(kc_vi *v, int e1, int e2)
 {
     kc_vi_push(v, e1);
     kc_vi_push(v, e2);
 }
-static inline void kc_vi_push2_idx(kc_vi *v, int e1, int e2, int idx)
+static inline void kc_vi_push2_idx(kc_vi *v, int idx, int e1, int e2)
 {
-    kc_vi_push_idx(v, e1, idx);
-    kc_vi_push_idx(v, e2, idx + 1);
+    printf("e1 = %i, e2 = %i\n", e1, e2);
+    v->ptr[idx] = e1;
+    v->ptr[idx + 1] = e2;
+    // kc_vi_push_idx(v, e1, idx);
+    // kc_vi_push_idx(v, e2, idx + 1);
 }
 static inline void kc_vi_fill(kc_vi *v, int n, int fill)
 {
@@ -185,6 +178,17 @@ static inline int kc_vi_remove(kc_vi *v, int e)
     kc_vi_resize(v, v->size - 1);
     return 1;
 }
+
+static inline void kc_vi_randomized_order(kc_vi *p)
+{
+    int v;
+    for (v = 0; v < p->size; v++)
+    {
+        int vRand = Num % p->size;
+        KC_SWAP(int, p->ptr[vRand], p->ptr[v]);
+    }
+}
+
 static inline void kc_vi_print(kc_vi *v)
 {
     printf("Array with %d entries:", v->size);
@@ -441,6 +445,8 @@ static inline int kc_gg_is_pi(kc_gg *p, int v) { return kc_gg_fanin(p, v, 0) == 
 static inline int kc_gg_is_po(kc_gg *p, int v) { return kc_gg_fanin(p, v, 0) != KC_GG_NULL && kc_gg_fanin(p, v, 1) == KC_GG_NULL; }
 static inline int kc_gg_is_node(kc_gg *p, int v) { return kc_gg_fanin(p, v, 0) != KC_GG_NULL && kc_gg_fanin(p, v, 1) != KC_GG_NULL; }
 
+static inline int kc_gg_is_empty(kc_gg *p, int v) { return kc_gg_fanin(p, v, 0) == -1; }
+
 // managing traversal IDs
 static inline int kc_gg_tid_increment(kc_gg *p)
 {
@@ -449,59 +455,74 @@ static inline int kc_gg_tid_increment(kc_gg *p)
 }
 
 // shift right part array
-static inline void kc_gg_shift(kc_gg *gg, int idx)
-{
-    int lit0, lit1;
-    for (int i = idx + 1; i < gg->size; i++)
-    {
-        lit0 = kc_gg_fanin(gg, i, 0);
-        lit1 = kc_gg_fanin(gg, i, 1);
-        if (kc_gg_is_po(gg, i))
-            kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
-        else
-        {
-            if (i == idx + 1)
-            {
-                kc_vi_write(&gg->fans, 2 * i, 2 * (i - 1));
-                if (!kc_gg_is_pi(gg, kc_l2v(lit1)) && (lit1 > 2 * i + 1))
-                    kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
-            }
-            else
-            {
-                if (!kc_gg_is_pi(gg, kc_l2v(lit0)))
-                    kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
-                if (!kc_gg_is_pi(gg, kc_l2v(lit1)))
-                    kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
-                if (lit0 > 2 * i + 1)
-                    kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
-                if (lit1 > 2 * i + 1)
-                    kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
-            }
-        }
-    }
-}
+// static inline void kc_gg_shift(kc_gg *gg, int idx)
+// {
+//     int lit0, lit1;
+//     for (int i = idx + 1; i < gg->size; i++)
+//     {
+//         lit0 = kc_gg_fanin(gg, i, 0);
+//         lit1 = kc_gg_fanin(gg, i, 1);
+//         if (kc_gg_is_po(gg, i))
+//             kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
+//         else
+//         {
+//             if (i == idx + 1)
+//             {
+//                 kc_vi_write(&gg->fans, 2 * i, 2 * (i - 1));
+//                 if (!kc_gg_is_pi(gg, kc_l2v(lit1)) && (lit1 > 2 * i + 1))
+//                     kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
+//             }
+//             else
+//             {
+//                 if (!kc_gg_is_pi(gg, kc_l2v(lit0)))
+//                     kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
+//                 if (!kc_gg_is_pi(gg, kc_l2v(lit1)))
+//                     kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
+//                 if (lit0 > 2 * i + 1)
+//                     kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
+//                 if (lit1 > 2 * i + 1)
+//                     kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
+//             }
+//         }
+//     }
+// }
 
 // adds one node to the AIG
 static inline int kc_gg_add_obj(kc_gg *p, int lit0, int lit1)
 {
     int ilast = p->size++;
     kc_vi_push2(&p->tids, 0, 0);
-    kc_vi_push2(&p->fans, lit0, lit1);
+    if (lit0 < lit1)
+        kc_vi_push2(&p->fans, lit0, lit1);
+    else
+        kc_vi_push2(&p->fans, lit1, lit0);
+    // if (!(lit0 == -1 || lit1 == -1))
+    //     kc_vi_push2(&p->edges, kc_v2l(ilast, 0), kc_v2l(ilast, 1));
+
     p->nins += kc_gg_is_pi(p, ilast);
     p->nouts += kc_gg_is_po(p, ilast);
     return 2 * ilast;
 }
 
 // insert one node at idx to the AIG
-static inline void kc_gg_insert_obj(kc_gg *p, int idx, int lit0, int lit1)
-{
-    p->size++;
-    kc_vi_push2_idx(&p->tids, 0, 0, idx);
-    kc_vi_push2_idx(&p->fans, lit0, lit1, idx);
-    kc_gg_shift(p, idx / 2);
-    p->nins += kc_gg_is_pi(p, idx / 2);
-    p->nouts += kc_gg_is_po(p, idx / 2);
-}
+// static inline void kc_gg_insert_obj(kc_gg *p, int idx, int lit, int ratio)
+// {
+//     // p->size++;
+//     int i;
+//     for (i = 1; i < ratio; i++)
+//     {
+//         printf("idx = %i\n", kc_l2v(idx));
+//         if (!kc_gg_is_node(p, kc_l2v(idx) - i))
+//             break;
+//     }
+//     printf("(%i, %i) is not a node\n", kc_gg_fanin(p, kc_l2v(idx) - i, 0), kc_gg_fanin(p, kc_l2v(idx) - i, 1));
+//     // kc_vi_push2_idx(&p->fans, idx, lit);
+//     kc_vi_push2_idx(&p->tids, 2 * (kc_l2v(idx) - i), 0, 0);
+//     kc_vi_push2_idx(&p->fans, 2 * (kc_l2v(idx) - i), kc_gg_fanin(p, kc_l2v(idx), kc_l2c(idx)), lit);
+//     // kc_gg_shift(p, idx / 2);
+//     p->nins += kc_gg_is_pi(p, kc_l2v(idx) - i);
+//     p->nouts += kc_gg_is_po(p, kc_l2v(idx) - i);
+// }
 
 // delete one node at idx to the AIG
 static inline void kc_gg_delete_obj(kc_gg *p, int idx)
@@ -562,7 +583,8 @@ static inline bool kc_gg_verify(kc_gg *gg1, kc_gg *gg2)
         int obj2 = kc_gg_obj_num(gg2) - kc_gg_po_num(gg2) + i;
         if (!kc_vt_is_equal2(&gg1->funcs, kc_gg_fanin(gg1, obj1, 0),
                              &gg2->funcs, kc_gg_fanin(gg2, obj2, 0)))
-            printf("Verification failed for output %d.", i), nFails++;
+            printf("Verification failed for output %d.", i),
+                nFails++;
     }
     if (nFails == 0)
     {
@@ -579,6 +601,8 @@ static inline bool kc_gg_verify(kc_gg *gg1, kc_gg *gg2)
 // printing the graph
 void kc_gg_print_lit(kc_gg *gg, int lit)
 {
+    if (lit == -1)
+        return;
     assert(lit >= 0);
     assert(!kc_gg_is_po(gg, kc_l2v(lit)));
     if (lit < 2)
@@ -590,24 +614,37 @@ void kc_gg_print_lit(kc_gg *gg, int lit)
 }
 void kc_gg_print(kc_gg *gg, int verbose)
 {
-    int i, nIns = 0, nOuts = 0, nAnds = 0;
+    int i, nIns = 0, nOuts = 0, nAnds = 0, nInvalid = 0;
     for (i = 0; i < gg->size; i++)
     {
-        printf("Obj%02d : ", i);
-        if (kc_gg_is_const0(gg, i))
-            printf("const0");
-        else if (kc_gg_is_pi(gg, i))
-            printf("i%02d = %c", nIns, (char)('a' - 1 + i)), nIns++;
-        else if (kc_gg_is_po(gg, i))
-            printf("o%02d = ", nOuts), kc_gg_print_lit(gg, kc_gg_fanin(gg, i, 0)), nOuts++;
-        else // internal node
-            printf("n%02d = ", i), kc_gg_print_lit(gg, kc_gg_fanin(gg, i, 0)), printf(" & "), kc_gg_print_lit(gg, kc_gg_fanin(gg, i, 1)), nAnds++;
-        printf("\n");
+        if (!(kc_gg_fanin(gg, i, 0) == -1 || kc_gg_fanin(gg, i, 1) == -1))
+        {
+            printf("Obj%02d : ", i);
+            if (kc_gg_is_const0(gg, i))
+                printf("const0");
+            else if (kc_gg_is_pi(gg, i))
+                printf("i%02d = %c", nIns, (char)('a' - 1 + i)), nIns++;
+            else if (kc_gg_is_po(gg, i))
+                printf("o%02d = ", nOuts), kc_gg_print_lit(gg, kc_gg_fanin(gg, i, 0)), nOuts++;
+            else // internal node
+                printf("n%02d = ", i), kc_gg_print_lit(gg, kc_gg_fanin(gg, i, 0)), printf(" & "), kc_gg_print_lit(gg, kc_gg_fanin(gg, i, 1)), nAnds++;
+            printf("\n");
+        }
+        else
+            nInvalid++;
     }
     assert(nIns == kc_gg_pi_num(gg));
     assert(nOuts == kc_gg_po_num(gg));
-    assert(nAnds == kc_gg_node_num(gg));
+    assert(nAnds == kc_gg_node_num(gg) - nInvalid);
     printf("The graph contains %d inputs, %d outputs, and %d internal and-nodes.\n", nIns, nOuts, nAnds);
+}
+
+int kc_gg_check_structurally_similar(kc_gg *gg, int lit1, int lit2)
+{
+    for (int i = 1 + gg->nins; i < gg->size - gg->nouts; i++)
+        if (kc_gg_fanin(gg, i, 0) == lit1 && kc_gg_fanin(gg, i, 1) == lit2)
+            return kc_v2l(i, 0);
+    return -1;
 }
 
 // duplicates AIG
@@ -617,20 +654,208 @@ kc_gg *kc_gg_dup(kc_gg *gg)
     int *pCopy = (int *)malloc(sizeof(int) * 2 * gg->size);
     for (int i = 0; i < gg->size; i++)
     {
+        if (kc_gg_is_empty(gg, i))
+            continue;
         if (kc_gg_is_const0(gg, i))
             pCopy[2 * i] = kc_gg_add_obj(ggNew, KC_GG_NULL, KC_GG_NULL);
         else if (kc_gg_is_pi(gg, i))
             pCopy[2 * i] = kc_gg_add_obj(ggNew, KC_GG_NULL, KC_GG_NULL);
         else if (kc_gg_is_po(gg, i))
             pCopy[2 * i] = kc_gg_add_obj(ggNew, pCopy[kc_gg_fanin(gg, i, 0)], KC_GG_NULL);
-        else // internal node
-            pCopy[2 * i] = kc_gg_add_obj(ggNew, pCopy[kc_gg_fanin(gg, i, 0)], pCopy[kc_gg_fanin(gg, i, 1)]);
+        else if (pCopy[kc_gg_fanin(gg, i, 0)] == 0 || pCopy[kc_gg_fanin(gg, i, 1)] == 0)
+            pCopy[2 * i] = 0;
+        else if (pCopy[kc_gg_fanin(gg, i, 0)] == 1)
+            pCopy[2 * i] = pCopy[kc_gg_fanin(gg, i, 1)];
+        else if (pCopy[kc_gg_fanin(gg, i, 1)] == 1)
+            pCopy[2 * i] = pCopy[kc_gg_fanin(gg, i, 0)];
+        else
+        {
+            int lit = (kc_gg_check_structurally_similar(ggNew, pCopy[kc_gg_fanin(gg, i, 0)], pCopy[kc_gg_fanin(gg, i, 1)]));
+            if (lit == -1)
+                pCopy[2 * i] = kc_gg_add_obj(ggNew, pCopy[kc_gg_fanin(gg, i, 0)], pCopy[kc_gg_fanin(gg, i, 1)]);
+            else
+                pCopy[2 * i] = lit;
+        }
         pCopy[2 * i + 1] = kc_lnot(pCopy[2 * i]);
     }
     free(pCopy);
     return ggNew;
 }
 
+// extend AIG by inserting emty nodes (-1, -1)
+kc_gg *kc_gg_extend(kc_gg *gg, int ratio)
+{
+    kc_gg *ggNew = kc_gg_start(5 * (ratio + 1) * gg->cap);
+    int size = (((gg->nins + 1) + (gg->size - gg->nins - 1) * (ratio + 1)));
+    int *pCopy = (int *)malloc(sizeof(int) * 2 * size);
+    int count = 1;
+    for (int i = 0; i < gg->nins + 1; i++)
+    {
+        if (kc_gg_is_const0(gg, i))
+            pCopy[2 * i] = kc_gg_add_obj(ggNew, KC_GG_NULL, KC_GG_NULL);
+        else if (kc_gg_is_pi(gg, i))
+            pCopy[2 * i] = kc_gg_add_obj(ggNew, KC_GG_NULL, KC_GG_NULL);
+    }
+    for (int i = gg->nins + 1; i < size; i++)
+    {
+        if (count % (ratio + 1) == 0)
+        {
+            if (kc_gg_is_po(gg, (i - ratio * (count / (ratio + 1)))))
+            {
+                if (kc_gg_is_pi(gg, kc_l2v(pCopy[kc_gg_fanin(gg, (i - ratio * (count / (ratio + 1))), 0)])))
+                    pCopy[2 * i] = kc_gg_add_obj(ggNew, pCopy[kc_gg_fanin(gg, (i - ratio * (count / (ratio + 1))), 0)], KC_GG_NULL);
+                else
+                    pCopy[2 * i] = kc_gg_add_obj(ggNew, 2 * (pCopy[kc_gg_fanin(gg, (i - ratio * (count / (ratio + 1))), 0)] / 2 + ratio * ((count / (ratio + 1)) - 1)), KC_GG_NULL);
+            }
+            else
+            {
+                if (kc_gg_is_pi(gg, kc_l2v(pCopy[kc_gg_fanin(gg, (i - ratio * (count / (ratio + 1))), 0)])) && kc_gg_is_pi(gg, kc_l2v(pCopy[kc_gg_fanin(gg, (i - ratio * (count / (ratio + 1))), 1)])))
+                    pCopy[2 * i] = kc_gg_add_obj(ggNew, pCopy[kc_gg_fanin(gg, (i - ratio * (count / (ratio + 1))), 0)], pCopy[kc_gg_fanin(gg, (i - ratio * (count / (ratio + 1))), 1)]);
+                else if (kc_gg_is_pi(gg, kc_l2v(pCopy[kc_gg_fanin(gg, (i - ratio * (count / (ratio + 1))), 0)])))
+                    pCopy[2 * i] = kc_gg_add_obj(ggNew, pCopy[kc_gg_fanin(gg, (i - ratio * (count / (ratio + 1))), 0)], 2 * (pCopy[kc_gg_fanin(gg, (i - ratio * (count / (ratio + 1))), 1)] / 2 + ratio * ((count / (ratio + 1)) - 1)));
+                else if (kc_gg_is_pi(gg, kc_l2v(pCopy[kc_gg_fanin(gg, (i - ratio * (count / (ratio + 1))), 1)])))
+                    pCopy[2 * i] = kc_gg_add_obj(ggNew, 2 * (pCopy[kc_gg_fanin(gg, (i - ratio * (count / (ratio + 1))), 0)] / 2 + ratio * ((count / (ratio + 1)) - 1)), pCopy[kc_gg_fanin(gg, (i - ratio * (count / (ratio + 1))), 1)]);
+                else
+                    pCopy[2 * i] = kc_gg_add_obj(ggNew, 2 * (pCopy[kc_gg_fanin(gg, (i - ratio * (count / (ratio + 1))), 0)] / 2 + ratio * ((count / (ratio + 1)) - 1)), 2 * (pCopy[kc_gg_fanin(gg, (i - ratio * (count / (ratio + 1))), 1)] / 2 + ratio * ((count / (ratio + 1)) - 1)));
+            }
+        }
+        else
+            pCopy[2 * i] = kc_gg_add_obj(ggNew, -1, 1);
+        count++;
+        pCopy[2 * i + 1] = kc_lnot(pCopy[2 * i]);
+    }
+    free(pCopy);
+    return ggNew;
+}
+
+/*************************************************************
+                    new extension procedure
+**************************************************************/
+
+// this procedure transforms the old AIG literal i
+// into a new AIG literal from the new AIG that is extended "ratio" times
+static inline int kc_gg_trans_lit(int i, int ratio)
+{
+    return kc_v2l(kc_l2v(i) * ratio, kc_l2c(i));
+}
+
+// this procedure extends gg to have several times more nodes
+// (for example, when ratio=3, the new gg has 3x more nodes)
+// each original node (lit0, lit1) is followed by two empty nodes (-1, -1)
+static inline kc_gg *kc_gg_extend2(kc_gg *gg, int ratio)
+{
+    kc_gg *ggNew = kc_gg_start(gg->size * ratio);
+    // fill up the fanin array with value -1
+    kc_vi_fill(&ggNew->fans, 2 * gg->size * ratio, -1);
+    kc_vi_fill(&ggNew->tids, 2 * gg->size * ratio, 0);
+    ggNew->size = gg->size * ratio;
+    ggNew->nins = gg->nins;
+    ggNew->nouts = gg->nouts;
+    // since we do not grow these arrays, we can access entries directly
+    int *pFansOld = kc_vi_array(&gg->fans);
+    int *pFansNew = kc_vi_array(&ggNew->fans);
+    // remap old literals into new literals while transforming them
+    for (int i = 0; i < 2 * gg->size; i++)
+        if (pFansOld[i] == KC_GG_NULL)
+            pFansNew[kc_gg_trans_lit(i, ratio)] = KC_GG_NULL;
+        else
+            pFansNew[kc_gg_trans_lit(i, ratio)] = kc_gg_trans_lit(pFansOld[i], ratio);
+    return ggNew;
+}
+
+static inline void kc_gg_extend2_test(kc_gg *gg, int ratio)
+{
+    kc_gg *ggNew = kc_gg_extend2(gg, ratio);
+    kc_gg *ggOld = kc_gg_dup(ggNew);
+    // get the fanin arrays
+    kc_vi *viOldOld = &gg->fans;
+    kc_vi *viNewOld = &ggOld->fans;
+    // check that the literal arrays of gg and ggOld are the same
+    assert(viOldOld->size == viNewOld->size);
+    if (memcmp(viOldOld->ptr, viNewOld->ptr, sizeof(int) * viNewOld->size) == 0)
+        printf("Verification passed.\n");
+    else
+        printf("Verification failed.\n");
+}
+
+/*************************************************************
+                inserting / removing nodes
+**************************************************************/
+
+// iIndex is the index in the array "&gg->fans" of the edge where a new node is added
+// iNewLit is the second literal of the new node (iNewLit == 1 preserves functionality)
+static inline int kc_gg_insert_node(kc_gg *gg, int iIndex, int iNewLit)
+{
+
+    int iNode = kc_l2v(iIndex); // the node whose edge is being updated
+
+    int iPrev1 = iNode - 1; // the previous node
+    int iPrev2 = iNode - 2; // the node before the previous node
+    int iPrev = -1;
+    assert(!kc_gg_is_empty(gg, iNode));
+    // one of the two previous nodes should be empty
+    if (kc_gg_is_empty(gg, iPrev1))
+        iPrev = iPrev1;
+    else if (kc_gg_is_empty(gg, iPrev2))
+        iPrev = iPrev2;
+    else
+        return -1;
+    assert(iPrev != -1);
+
+    if (kc_gg_is_po(gg, iNode) && kc_l2c(iIndex) == 1)
+    {
+        // transform iPrev into a new node having the same edge and iNewLit
+        kc_vi_write(&gg->fans, kc_v2l(iPrev, 0), kc_vi_read(&gg->fans, iIndex - 1));
+        kc_vi_write(&gg->fans, kc_v2l(iPrev, 1), iNewLit);
+        // redirect the edge to point to the new node
+        kc_vi_write(&gg->fans, iIndex - 1, kc_v2l(iPrev, 0));
+    }
+    else
+    {
+        // transform iPrev into a new node having the same edge and iNewLit
+        kc_vi_write(&gg->fans, kc_v2l(iPrev, 0), kc_vi_read(&gg->fans, iIndex));
+        kc_vi_write(&gg->fans, kc_v2l(iPrev, 1), iNewLit);
+        // redirect the edge to point to the new node
+        kc_vi_write(&gg->fans, iIndex, kc_v2l(iPrev, 0));
+    }
+    return iPrev;
+}
+static inline kc_vi *kc_gg_edges_indices(kc_gg *gg, int ratio)
+{
+    kc_vi *edges = (kc_vi *)calloc(sizeof(kc_vi), 1);
+    kc_vi_start(edges, (gg->size - gg->nins - gg->nouts));
+
+    for (int i = 2 * ratio * (gg->nins + 1); i < 2 * (gg->size - gg->nouts * ratio); i++)
+    {
+        if (!kc_gg_is_empty(gg, kc_l2v(i)))
+            kc_vi_push(edges, i);
+        // printf("edge: %i and (%i, %i)\n", i, kc_gg_fanin(gg, kc_l2v(i), 0), kc_gg_fanin(gg, kc_l2v(i), 1));
+    }
+    return edges;
+}
+// iIndex is the index in the array "&gg->fans" of the edge to be removed
+static inline void kc_gg_remove_edge(kc_gg *gg, int iIndex)
+{
+    // printf("index %i\n", iIndex);
+    kc_vi_write(&gg->fans, iIndex, 1);
+    // printf("hello\n");
+}
+
+static inline void kc_gg_reverse_node(kc_gg *gg, int iNode, int iChange)
+{
+    // printf("iNode = %i, index at iNode")
+    if (kc_gg_is_po(gg, kc_l2v(iChange)) && kc_l2c(iChange) == 1)
+        kc_vi_write(&gg->fans, iChange - 1, kc_gg_fanin(gg, iNode, 0));
+    else
+        kc_vi_write(&gg->fans, iChange, kc_gg_fanin(gg, iNode, 0));
+    kc_vi_write(&gg->fans, kc_v2l(iNode, 0), -1);
+    kc_vi_write(&gg->fans, kc_v2l(iNode, 1), -1);
+}
+
+static inline void kc_gg_reverse_edge(kc_gg *gg, int iEdge, int val)
+{
+    kc_vi_write(&gg->fans, iEdge, val);
+}
 /*************************************************************
                     AIGER interface
 **************************************************************/
@@ -720,14 +945,16 @@ static int *kc_aiger_read(char *pFileName, int *pnObjs, int *pnIns, int *pnLatch
         *pnAnds = nAnds;
     return pObjs;
 }
-static kc_gg *kc_gg_aiger_read(char *pFileName, int fVerbose)
+static kc_gg *kc_gg_aiger_read(char *pFileName, int fVerbose, int ratio)
 {
     int i, nObjs, nIns, nLatches, nOuts, nAnds, *pObjs = kc_aiger_read(pFileName, &nObjs, &nIns, &nLatches, &nOuts, &nAnds);
     if (pObjs == NULL)
         return NULL;
-    kc_gg *p = kc_gg_start(3 * nObjs);
+    kc_gg *p = kc_gg_start((ratio + 1) * 3 * nObjs);
+    printf("num of obj %i\n", nObjs);
     for (i = 0; i < nObjs; i++)
         kc_gg_add_obj(p, pObjs[2 * i + 0], pObjs[2 * i + 1]);
+
     if (fVerbose)
         printf("Loaded AIG from the AIGER file \"%s\".\n", pFileName);
     kc_gg_print(p, fVerbose);
@@ -789,9 +1016,9 @@ static void kc_gg_aiger_write(char *pFileName, kc_gg *gg, int fVerbose)
     kc_gg_stop(ggNew);
 }
 
-static void kc_gg_aiger_test(char *pFileNameIn, char *pFileNameOut)
+static void kc_gg_aiger_test(char *pFileNameIn, char *pFileNameOut, int ratio)
 {
-    kc_gg *p = kc_gg_aiger_read(pFileNameIn, 1);
+    kc_gg *p = kc_gg_aiger_read(pFileNameIn, 1, ratio);
     if (p == NULL)
         return;
     printf("Finished reading input file \"%s\".\n", pFileNameIn);
@@ -804,50 +1031,89 @@ static void kc_gg_aiger_test(char *pFileNameIn, char *pFileNameOut)
                   Top level procedures
 **************************************************************/
 
+
 extern "C"
 {
-    int kc_top_level_call(char *pFileNameIn, int nadds, int verbose)
+    int kc_top_level_call(char *pFileNameIn, int verbose, int ratio, int nadds)
     {
         clock_t clkStart = clock();
         int iChange, iDelete, iCand;
-        kc_gg *gg = kc_gg_aiger_read(pFileNameIn, 1);
-        kc_gg *ggCopy;
-        kc_gg *ggCopy2;
-        if (gg == NULL)
+        kc_gg *ggOrig = kc_gg_aiger_read(pFileNameIn, 1, ratio);
+        kc_gg_simulate(ggOrig);
+        if (ggOrig == NULL)
             return 0;
         printf("Finished reading input file \"%s\".\n", pFileNameIn);
-        printf("\n\n Starting insertion\n\n");
-        int start = (gg->nins + 1);
-        for (int i = 0; i < nadds;)
+
+        kc_gg *gg = kc_gg_extend2(ggOrig, ratio);
+
+        kc_vi *edgesToInsert = kc_gg_edges_indices(gg, ratio);
+        kc_vi_randomized_order(edgesToInsert);
+        for (int i = 0; i < edgesToInsert->size; i++)
+            printf("%i ", edgesToInsert->ptr[i]);
+        printf("\n\n");
+        assert(nadds <= edgesToInsert->size);
+        kc_gg *ggNew;
+        // printf("\n\n Starting insertion\n\n");
+        int start = 2 * ratio * (gg->nins + 1);
+        for (int i = 0; i < nadds; i++)
         {
-            ggCopy = kc_gg_dup(gg);
-            iChange = start + (Num % (gg->size - start));
-            iCand = 2 + Num % ((2 * iChange - 2) - 2);
-            kc_gg_insert_obj(gg, 2 * iChange, kc_gg_fanin(gg, iChange, 0), iCand);
-            kc_gg_simulate(gg);
-            kc_gg_simulate(ggCopy);
-            if (!kc_gg_verify(gg, ggCopy))
-                gg = kc_gg_dup(ggCopy);
-            else
-                i++;
-            
+            do
+            {
+                iChange = start + (Num % (2 * gg->size - 1 - start));
+            } while (kc_gg_is_empty(gg, kc_l2v(iChange)));
+            iCand = 2 * ratio + Num % ((edgesToInsert->ptr[i] - 2) - 2);
+            printf("Before\n");
+            for (int j = 0; j < gg->size; j++)
+            {
+                printf("(%i, %i) ", kc_gg_fanin(gg, j, 0), kc_gg_fanin(gg, j, 1));
+            }
+            printf("\n");
+
+            int iNode = kc_gg_insert_node(gg, edgesToInsert->ptr[i], iCand);
+            printf("After\n");
+            // printf("index = %i, val = (%i, %i)\n", iChange, kc_gg_fanin(gg, kc_l2v(iChange), 0), kc_gg_fanin(gg, kc_l2v(iChange), 1));
+            for (int j = 0; j < gg->size; j++)
+            {
+                printf("(%i, %i) ", kc_gg_fanin(gg, j, 0), kc_gg_fanin(gg, j, 1));
+            }
+            printf("\n");
+            // printf("\n index = %i\n", iNode);
+
+            ggNew = kc_gg_dup(gg);
+            kc_gg_simulate(ggNew);
+
+            if (!kc_gg_verify(ggNew, ggOrig))
+                kc_gg_reverse_node(gg, iNode, edgesToInsert->ptr[i]);
         }
-        kc_gg_print(gg, 1);
-        
-        printf("\n\n Starting deletion\n\n");
-        for (int i = 0; i < gg->size + nadds;)
+        printf("\n\n Finished insertion\n\n");
+        kc_gg *ggReverse = kc_gg_dup(gg);
+        // kc_gg_print(ggReverse, 1);
+        // printf("\n\n Starting deletion\n\n");
+        kc_vi *edges = kc_gg_edges_indices(ggReverse, 1);
+        kc_vi_randomized_order(edges);
+        for (int i = 0; i < edges->size; i++)
         {
-            ggCopy2 = kc_gg_dup(gg);
-            iDelete = 2 * start + (Num % (2 * gg->size - 2 * start - 2 * gg->nouts));
-            kc_gg_delete_obj(gg, iDelete);
-            kc_gg_simulate(gg);
-            kc_gg_simulate(ggCopy2);
-            if (!kc_gg_verify(gg, ggCopy2))
-                gg = kc_gg_dup(ggCopy2);
-            else
-                i++;
+            // printf("Before\n");
+            // for (int j = 0; j < ggReverse->size; j++)
+            //     printf("(%i, %i) ", kc_gg_fanin(ggReverse, j, 0), kc_gg_fanin(ggReverse, j, 1));
+            // printf("\n");
+
+            int deletedVal = kc_gg_fanin(ggReverse, kc_l2v(edges->ptr[i]), kc_l2c(edges->ptr[i]));
+            kc_gg_remove_edge(ggReverse, edges->ptr[i]);
+
+            // printf("After\n");
+            // for (int j = 0; j < ggReverse->size; j++)
+            //     printf("(%i, %i) ", kc_gg_fanin(ggReverse, j, 0), kc_gg_fanin(ggReverse, j, 1));
+            // printf("\n");
+
+            kc_gg_simulate(ggReverse);
+            if (!kc_gg_verify(ggReverse, ggOrig))
+                kc_gg_reverse_edge(ggReverse, edges->ptr[i], deletedVal);
         }
-        kc_gg_print(gg, 1);
+        printf("\nFinished reduction\n\n");
+        kc_gg *ggFinal = kc_gg_dup(ggReverse);
+        kc_gg_print(ggFinal, 1);
+        printf("Time =%6.2f sec\n", (float)(clock() - clkStart) / CLOCKS_PER_SEC);
         return 1;
     }
 }
@@ -877,7 +1143,11 @@ int main(int argc, char **argv)
     {
         int nAdds = 0;
         int verbose = 0;
-        kc_top_level_call(argv[argc - 1], 5, 1);
+        kc_top_level_call(argv[argc - 1], 1, 3, 10);
+
+        // kc_gg *ggOrig = kc_gg_aiger_read(argv[argc - 1], 1, 0);
+        // kc_gg_extend2_test( ggOrig, 3 );
+        // kc_gg_stop( ggOrig );
     }
 }
 
