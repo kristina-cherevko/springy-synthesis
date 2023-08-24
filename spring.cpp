@@ -583,17 +583,17 @@ static inline bool kc_gg_verify(kc_gg *gg1, kc_gg *gg2)
         int obj2 = kc_gg_obj_num(gg2) - kc_gg_po_num(gg2) + i;
         if (!kc_vt_is_equal2(&gg1->funcs, kc_gg_fanin(gg1, obj1, 0),
                              &gg2->funcs, kc_gg_fanin(gg2, obj2, 0)))
-            printf("Verification failed for output %d.", i),
-                nFails++;
+            // printf("Verification failed for output %d.", i),
+            nFails++;
     }
     if (nFails == 0)
     {
-        printf("Verification successful!\n");
+        // printf("Verification successful!\n");
         return 1;
     }
     else
     {
-        printf("Verification failed for %d outputs.\n", nFails);
+        // printf("Verification failed for %d outputs.\n", nFails);
         return 0;
     }
 }
@@ -1031,93 +1031,247 @@ static void kc_gg_aiger_test(char *pFileNameIn, char *pFileNameOut, int ratio)
                   Top level procedures
 **************************************************************/
 
+static inline void kc_top_level_insert(kc_gg *gg, int ratio, int nadds, kc_gg *ggOrig)
+{
+    int iChange, iDelete, iCand;
+    kc_gg *ggNew;
+    kc_gg_simulate(ggOrig);
+    kc_vi *edgesToInsert = kc_gg_edges_indices(gg, ratio);
+    kc_vi_randomized_order(edgesToInsert);
+    // printf("inserting:\n");
+    // for (int i = 0; i < edgesToInsert->size; i++)
+    //     printf("%i ", edgesToInsert->ptr[i]);
+    // printf("\n\n");
+    assert(nadds <= edgesToInsert->size);
+
+    int start = 2 * ratio * (gg->nins + 1);
+    for (int i = 0; i < nadds; i++)
+    {
+        iCand = 2 * ratio + Num % ((edgesToInsert->ptr[i] - 2) - 2);
+        int iNode = kc_gg_insert_node(gg, edgesToInsert->ptr[i], iCand);
+        ggNew = kc_gg_dup(gg);
+        kc_gg_simulate(ggNew);
+        if (!kc_gg_verify(ggNew, ggOrig))
+            kc_gg_reverse_node(gg, iNode, edgesToInsert->ptr[i]);
+    }
+}
+
+static inline kc_gg *kc_top_level_delete(kc_gg *gg, int ratio, kc_gg *ggOrig)
+{
+    kc_gg *ggReverse = kc_gg_dup(gg);
+    kc_vi *edges = kc_gg_edges_indices(ggReverse, 1);
+
+    kc_vi_randomized_order(edges);
+    // printf("deleting:\n");
+    // for (int i = 0; i < edges->size; i++)
+    //     printf("%i ", edges->ptr[i]);
+    // printf("\n\n");
+    for (int i = 0; i < edges->size; i++)
+    {
+        int deletedVal = kc_gg_fanin(ggReverse, kc_l2v(edges->ptr[i]), kc_l2c(edges->ptr[i]));
+        kc_gg_remove_edge(ggReverse, edges->ptr[i]);
+        kc_gg_simulate(ggReverse);
+        if (!kc_gg_verify(ggReverse, ggOrig))
+            kc_gg_reverse_edge(ggReverse, edges->ptr[i], deletedVal);
+    }
+    return kc_gg_dup(ggReverse);
+}
+
+// insert nadds nodes and delete as many as we can
+kc_gg *kc_top_level_call_one(kc_gg *ggOrig, int ratio, int nadds, int verbose)
+{
+    kc_gg *gg = kc_gg_extend2(ggOrig, ratio);
+    kc_top_level_insert(gg, ratio, nadds, ggOrig);
+    printf("\n\n Finished insertion\n\n");
+    kc_gg *ggFinal = kc_top_level_delete(gg, ratio, ggOrig);
+    printf("\nFinished reduction\n\n");
+    return ggFinal;
+}
+
+// insert nadds nodes and than try to delete for nTriesToDelete times 
+kc_gg *kc_top_level_call_ndeletes(kc_gg *ggOrig, int ratio, int nadds, int ndeletes, int verbose)
+{
+    kc_gg *gg = kc_gg_extend2(ggOrig, ratio);
+    kc_gg *ggComplete;
+    kc_top_level_insert(gg, ratio, nadds, ggOrig);
+    printf("\n\n Finished insertion\n\n");
+    kc_gg *ggBest = kc_gg_dup(gg);
+    for (int i = 0; i < ndeletes; i++)
+    {
+        printf("nDeletes iteration %i\n", i);
+        ggComplete = kc_top_level_delete(gg, ratio, ggOrig);
+        if (ggComplete->size < ggBest->size)
+            ggBest = kc_gg_dup(ggComplete);
+    }
+    printf("\nFinished reduction\n\n");
+    return ggBest;
+}
+// try to insert and than delete for nIterations times 
+kc_gg *kc_top_level_call_iterate(kc_gg *ggOrig, int ratio, int nadds, int nIterations, int verbose)
+{
+    // kc_gg *gg = kc_gg_extend2(ggOrig, ratio);
+    kc_gg *ggComplete, *gg;
+    kc_gg *ggBest = kc_gg_dup(ggOrig);
+    for (int i = 0; i < nIterations; i++)
+    {
+        printf("iteration %i\n", i);
+        gg = kc_gg_extend2(ggOrig, ratio);
+        kc_top_level_insert(gg, ratio, nadds, ggOrig);
+        ggComplete = kc_top_level_delete(gg, ratio, ggOrig);
+        for (int j = 0; j < ggComplete->size; j++)
+        {
+            printf("(%i, %i) ", kc_gg_fanin(ggComplete, j, 0), kc_gg_fanin(ggComplete, j, 1));
+        }
+        printf("\n");
+        if (ggComplete->size < ggBest->size)
+            ggBest = kc_gg_dup(ggComplete);
+    }
+    return ggBest;
+}
+
+// try to insert and than delete for nIterations times, in each iteration try to delete for nTriesToDelete times 
+kc_gg *kc_top_level_call_iterate_ndeletes(kc_gg *ggOrig, int ratio, int nadds, int nIterations, int nTriesToDelete, int verbose)
+{
+    // kc_gg *gg = kc_gg_extend2(ggOrig, ratio);
+    kc_gg *ggComplete, *gg;
+    kc_gg *ggBest = kc_gg_dup(ggOrig);
+    for (int i = 0; i < nIterations; i++)
+    {
+        printf("iteration %i\n", i);
+        gg = kc_gg_extend2(ggOrig, ratio);
+        kc_top_level_insert(gg, ratio, nadds, ggOrig);
+        for (int j = 0; j < nTriesToDelete; j++)
+        {
+            ggComplete = kc_top_level_delete(gg, ratio, ggOrig);
+            if (ggComplete->size < ggBest->size)
+                ggBest = kc_gg_dup(ggComplete);
+        }
+    }
+    return ggBest;
+}
 
 extern "C"
 {
-    int kc_top_level_call(char *pFileNameIn, int verbose, int ratio, int nadds)
+    int kc_top_level_call(char *pFileNameIn, int ratio, int nadds, int nIterations, int nTriesToDelete, int verbose)
     {
         clock_t clkStart = clock();
         int iChange, iDelete, iCand;
         kc_gg *ggOrig = kc_gg_aiger_read(pFileNameIn, 1, ratio);
-        kc_gg_simulate(ggOrig);
         if (ggOrig == NULL)
             return 0;
         printf("Finished reading input file \"%s\".\n", pFileNameIn);
 
-        kc_gg *gg = kc_gg_extend2(ggOrig, ratio);
-
-        kc_vi *edgesToInsert = kc_gg_edges_indices(gg, ratio);
-        kc_vi_randomized_order(edgesToInsert);
-        for (int i = 0; i < edgesToInsert->size; i++)
-            printf("%i ", edgesToInsert->ptr[i]);
-        printf("\n\n");
-        assert(nadds <= edgesToInsert->size);
-        kc_gg *ggNew;
-        // printf("\n\n Starting insertion\n\n");
-        int start = 2 * ratio * (gg->nins + 1);
-        for (int i = 0; i < nadds; i++)
+        kc_gg *ggFinal;
+        if (nIterations != 0)
         {
-            do
-            {
-                iChange = start + (Num % (2 * gg->size - 1 - start));
-            } while (kc_gg_is_empty(gg, kc_l2v(iChange)));
-            iCand = 2 * ratio + Num % ((edgesToInsert->ptr[i] - 2) - 2);
-            printf("Before\n");
-            for (int j = 0; j < gg->size; j++)
-            {
-                printf("(%i, %i) ", kc_gg_fanin(gg, j, 0), kc_gg_fanin(gg, j, 1));
-            }
-            printf("\n");
-
-            int iNode = kc_gg_insert_node(gg, edgesToInsert->ptr[i], iCand);
-            printf("After\n");
-            // printf("index = %i, val = (%i, %i)\n", iChange, kc_gg_fanin(gg, kc_l2v(iChange), 0), kc_gg_fanin(gg, kc_l2v(iChange), 1));
-            for (int j = 0; j < gg->size; j++)
-            {
-                printf("(%i, %i) ", kc_gg_fanin(gg, j, 0), kc_gg_fanin(gg, j, 1));
-            }
-            printf("\n");
-            // printf("\n index = %i\n", iNode);
-
-            ggNew = kc_gg_dup(gg);
-            kc_gg_simulate(ggNew);
-
-            if (!kc_gg_verify(ggNew, ggOrig))
-                kc_gg_reverse_node(gg, iNode, edgesToInsert->ptr[i]);
+            if (nTriesToDelete != 0)
+                ggFinal = kc_top_level_call_iterate_ndeletes(ggOrig, ratio, nadds, nIterations, nTriesToDelete, verbose);
+            else
+                ggFinal = kc_top_level_call_iterate(ggOrig, ratio, nadds, nIterations, verbose);
         }
-        printf("\n\n Finished insertion\n\n");
-        kc_gg *ggReverse = kc_gg_dup(gg);
-        // kc_gg_print(ggReverse, 1);
-        // printf("\n\n Starting deletion\n\n");
-        kc_vi *edges = kc_gg_edges_indices(ggReverse, 1);
-        kc_vi_randomized_order(edges);
-        for (int i = 0; i < edges->size; i++)
+        else
         {
-            // printf("Before\n");
-            // for (int j = 0; j < ggReverse->size; j++)
-            //     printf("(%i, %i) ", kc_gg_fanin(ggReverse, j, 0), kc_gg_fanin(ggReverse, j, 1));
-            // printf("\n");
-
-            int deletedVal = kc_gg_fanin(ggReverse, kc_l2v(edges->ptr[i]), kc_l2c(edges->ptr[i]));
-            kc_gg_remove_edge(ggReverse, edges->ptr[i]);
-
-            // printf("After\n");
-            // for (int j = 0; j < ggReverse->size; j++)
-            //     printf("(%i, %i) ", kc_gg_fanin(ggReverse, j, 0), kc_gg_fanin(ggReverse, j, 1));
-            // printf("\n");
-
-            kc_gg_simulate(ggReverse);
-            if (!kc_gg_verify(ggReverse, ggOrig))
-                kc_gg_reverse_edge(ggReverse, edges->ptr[i], deletedVal);
+            if (nTriesToDelete != 0)
+                ggFinal = kc_top_level_call_ndeletes(ggOrig, ratio, nadds, nTriesToDelete, verbose);
+            else
+                ggFinal = kc_top_level_call_one(ggOrig, ratio, nadds, verbose);
         }
-        printf("\nFinished reduction\n\n");
-        kc_gg *ggFinal = kc_gg_dup(ggReverse);
-        kc_gg_print(ggFinal, 1);
+
+        kc_gg_print(ggFinal, verbose);
         printf("Time =%6.2f sec\n", (float)(clock() - clkStart) / CLOCKS_PER_SEC);
         return 1;
     }
+
+    // int kc_top_level_call(char *pFileNameIn, int verbose, int ratio, int nadds)
+    // {
+    //     clock_t clkStart = clock();
+    //     int iChange, iDelete, iCand;
+    //     kc_gg *ggOrig = kc_gg_aiger_read(pFileNameIn, 1, ratio);
+    //     kc_gg_simulate(ggOrig);
+    //     if (ggOrig == NULL)
+    //         return 0;
+    //     printf("Finished reading input file \"%s\".\n", pFileNameIn);
+
+    //     kc_gg *gg = kc_gg_extend2(ggOrig, ratio);
+
+    //     kc_vi *edgesToInsert = kc_gg_edges_indices(gg, ratio);
+    //     kc_vi_randomized_order(edgesToInsert);
+    //     for (int i = 0; i < edgesToInsert->size; i++)
+    //         printf("%i ", edgesToInsert->ptr[i]);
+    //     printf("\n\n");
+    //     assert(nadds <= edgesToInsert->size);
+    //     kc_gg *ggNew;
+    //     // printf("\n\n Starting insertion\n\n");
+    //     int start = 2 * ratio * (gg->nins + 1);
+    //     for (int i = 0; i < nadds; i++)
+    //     {
+    //         do
+    //         {
+    //             iChange = start + (Num % (2 * gg->size - 1 - start));
+    //         } while (kc_gg_is_empty(gg, kc_l2v(iChange)));
+    //         iCand = 2 * ratio + Num % ((edgesToInsert->ptr[i] - 2) - 2);
+    //         printf("Before\n");
+    //         for (int j = 0; j < gg->size; j++)
+    //         {
+    //             printf("(%i, %i) ", kc_gg_fanin(gg, j, 0), kc_gg_fanin(gg, j, 1));
+    //         }
+    //         printf("\n");
+
+    //         int iNode = kc_gg_insert_node(gg, edgesToInsert->ptr[i], iCand);
+    //         printf("After\n");
+    //         // printf("index = %i, val = (%i, %i)\n", iChange, kc_gg_fanin(gg, kc_l2v(iChange), 0), kc_gg_fanin(gg, kc_l2v(iChange), 1));
+    //         for (int j = 0; j < gg->size; j++)
+    //         {
+    //             printf("(%i, %i) ", kc_gg_fanin(gg, j, 0), kc_gg_fanin(gg, j, 1));
+    //         }
+    //         printf("\n");
+    //         // printf("\n index = %i\n", iNode);
+
+    //         ggNew = kc_gg_dup(gg);
+    //         kc_gg_simulate(ggNew);
+
+    //         if (!kc_gg_verify(ggNew, ggOrig))
+    //             kc_gg_reverse_node(gg, iNode, edgesToInsert->ptr[i]);
+    //     }
+    //     printf("\n\n Finished insertion\n\n");
+    //     kc_gg *ggReverse = kc_gg_dup(gg);
+    //     // kc_gg_print(ggReverse, 1);
+    //     // printf("\n\n Starting deletion\n\n");
+    //     kc_vi *edges = kc_gg_edges_indices(ggReverse, 1);
+    //     kc_vi_randomized_order(edges);
+    //     for (int i = 0; i < edges->size; i++)
+    //     {
+    //         // printf("Before\n");
+    //         // for (int j = 0; j < ggReverse->size; j++)
+    //         //     printf("(%i, %i) ", kc_gg_fanin(ggReverse, j, 0), kc_gg_fanin(ggReverse, j, 1));
+    //         // printf("\n");
+
+    //         int deletedVal = kc_gg_fanin(ggReverse, kc_l2v(edges->ptr[i]), kc_l2c(edges->ptr[i]));
+    //         kc_gg_remove_edge(ggReverse, edges->ptr[i]);
+
+    //         // printf("After\n");
+    //         // for (int j = 0; j < ggReverse->size; j++)
+    //         //     printf("(%i, %i) ", kc_gg_fanin(ggReverse, j, 0), kc_gg_fanin(ggReverse, j, 1));
+    //         // printf("\n");
+
+    //         kc_gg_simulate(ggReverse);
+    //         if (!kc_gg_verify(ggReverse, ggOrig))
+    //             kc_gg_reverse_edge(ggReverse, edges->ptr[i], deletedVal);
+    //     }
+    //     printf("\nFinished reduction\n\n");
+    //     kc_gg *ggFinal = kc_gg_dup(ggReverse);
+    //     kc_gg_print(ggFinal, 1);
+    //     printf("Time =%6.2f sec\n", (float)(clock() - clkStart) / CLOCKS_PER_SEC);
+    //     return 1;
+    // }
 }
 
+// printf("Before\n");
+// for (int j = 0; j < gg->size; j++)
+// {
+//     printf("(%i, %i) ", kc_gg_fanin(gg, j, 0), kc_gg_fanin(gg, j, 1));
+// }
+// printf("\n");
 /*************************************************************
                    main() procedure
 **************************************************************/
@@ -1132,18 +1286,29 @@ int main(int argc, char **argv)
 
     if (argc == 1)
     {
-        printf("usage:  %s <int> [-v] <string>\n", argv[0]);
+        printf("usage:  %s <int> <int> <int> [-v] <string>\n", argv[0]);
         printf("        this program synthesized circuits from truth tables\n");
+        printf("     <int> : ratio of empty nodes to full nodes, example ratio = 3 => empty to full nodes are 2:1\n");
         printf("     <int> : how many nodes to add before trying to delete\n");
+        printf("     <int> : how many iterations to try\n");
+        printf("     <int> : how many tries to delete\n");
         printf("        -v : enables verbose output\n");
         printf("  <string> : a truth table in hex notation or a file name\n");
         return 1;
     }
     else
     {
-        int nAdds = 0;
-        int verbose = 0;
-        kc_top_level_call(argv[argc - 1], 1, 3, 10);
+        // int ratio = std::stoi(argv[argc - 6]);
+        // int nAdds = std::stoi(argv[argc - 5]);
+        // int nIterations = std::stoi(argv[argc - 4]);
+        // int nTriesToDelete = std::stoi(argv[argc - 3]);
+        // int verbose = 0;
+        // if (argv[argc - 2][0] == '-' && argv[argc - 2][1] == 'v' && argv[argc - 2][2] == '\0')
+        //     verbose ^= 1;
+
+        // printf("arguments: %i, %i, %i, %i, %i\n", ratio, nAdds, nIterations, nTriesToDelete, verbose);
+        kc_top_level_call(argv[argc - 1], 3, 10, 5, 5, 1);
+        // kc_top_level_call(argv[argc - 1], ratio, nAdds, nIterations, nTriesToDelete, verbose);
 
         // kc_gg *ggOrig = kc_gg_aiger_read(argv[argc - 1], 1, 0);
         // kc_gg_extend2_test( ggOrig, 3 );
