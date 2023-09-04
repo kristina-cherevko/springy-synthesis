@@ -130,6 +130,13 @@ static inline void kc_vi_push(kc_vi *v, int e)
     kc_vi_grow(v);
     v->ptr[v->size++] = e;
 }
+
+static inline void kc_vi_shrink(kc_vi *v, int num)
+{
+    assert(num <= v->size);
+    v->size -= num;
+}
+
 static inline void kc_vi_push_idx(kc_vi *v, int e, int idx)
 {
     kc_vi_grow(v);
@@ -165,6 +172,21 @@ static inline void kc_vi_fill(kc_vi *v, int n, int fill)
     for (i = 0; i < n; i++)
         kc_vi_push(v, fill);
 }
+
+static inline void kc_vi_push_order(kc_vi *p, int Entry)
+{
+    int i;
+    if (p->size == p->cap)
+        kc_vi_grow(p);
+    p->size++;
+    for (i = p->size - 2; i >= 0; i--)
+        if (p->ptr[i] > Entry)
+            p->ptr[i + 1] = p->ptr[i];
+        else
+            break;
+    p->ptr[i + 1] = Entry;
+}
+
 static inline int kc_vi_remove(kc_vi *v, int e)
 {
     int j;
@@ -423,7 +445,10 @@ typedef struct kc_gg_
     int nouts; // the number of primary outputs
     int tid;   // the current traversal ID
 
-    kc_vi tids;  // the last visited tranversal ID of each object
+    kc_vi tids; // the last visited tranversal ID of each object
+    kc_vi prefs;
+    kc_vi vinner;
+    kc_vi vgate;
     kc_vi fans;  // the fanins of objects
     kc_vt funcs; // the functions of objects
 } kc_gg;
@@ -454,38 +479,27 @@ static inline int kc_gg_tid_increment(kc_gg *p)
     return p->tid++;
 }
 
-// shift right part array
-// static inline void kc_gg_shift(kc_gg *gg, int idx)
-// {
-//     int lit0, lit1;
-//     for (int i = idx + 1; i < gg->size; i++)
-//     {
-//         lit0 = kc_gg_fanin(gg, i, 0);
-//         lit1 = kc_gg_fanin(gg, i, 1);
-//         if (kc_gg_is_po(gg, i))
-//             kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
-//         else
-//         {
-//             if (i == idx + 1)
-//             {
-//                 kc_vi_write(&gg->fans, 2 * i, 2 * (i - 1));
-//                 if (!kc_gg_is_pi(gg, kc_l2v(lit1)) && (lit1 > 2 * i + 1))
-//                     kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
-//             }
-//             else
-//             {
-//                 if (!kc_gg_is_pi(gg, kc_l2v(lit0)))
-//                     kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
-//                 if (!kc_gg_is_pi(gg, kc_l2v(lit1)))
-//                     kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
-//                 if (lit0 > 2 * i + 1)
-//                     kc_vi_write(&gg->fans, 2 * i, lit0 + 2);
-//                 if (lit1 > 2 * i + 1)
-//                     kc_vi_write(&gg->fans, 2 * i + 1, lit1 + 2);
-//             }
-//         }
-//     }
-// }
+static inline void kc_gg_node_mark_rec(kc_gg *gg, int iLit)
+{
+    if (&gg->prefs[kc_l2v(iLit)] > 1 || !kc_gg_is_node(gg, kc_l2v(iLit) || kc_l2c(iLit)))
+    {
+        kc_vi_push_order(&gg->vgate, iLit);
+        return;
+    }
+    kc_gg_node_mark_rec(gg, &gg->fans[iLit]);
+    kc_gg_node_mark_rec(gg, &gg->fans[kc_lnot(iLit)]);
+    kc_vi_push(&gg->vinner, kc_l2v(iLit));
+}
+
+static inline kc_vi *kc_gg_node_mark(kc_gg *gg, int iNode)
+{
+    kc_vi_shrink(&gg->vgate, 0);
+    kc_vi_shrink(&gg->vinner, 0);
+    kc_gg_node_mark_rec(gg, kc_gg_fanin(gg, iNode, 0));
+    kc_gg_node_mark_rec(gg, kc_gg_fanin(gg, iNode, 1));
+    kc_vi_push(&gg->vinner, iNode);
+    return &gg->vgate;
+}
 
 // adds one node to the AIG
 static inline int kc_gg_add_obj(kc_gg *p, int lit0, int lit1)
@@ -1060,7 +1074,6 @@ static inline kc_gg *kc_top_level_delete(kc_gg *gg, int ratio, kc_gg *ggOrig)
 {
     kc_gg *ggReverse = kc_gg_dup(gg);
     kc_vi *edges = kc_gg_edges_indices(ggReverse, 1);
-
     kc_vi_randomized_order(edges);
     // printf("deleting:\n");
     // for (int i = 0; i < edges->size; i++)
@@ -1088,7 +1101,7 @@ kc_gg *kc_top_level_call_one(kc_gg *ggOrig, int ratio, int nadds, int verbose)
     return ggFinal;
 }
 
-// insert nadds nodes and than try to delete for nTriesToDelete times 
+// insert nadds nodes and than try to delete for nTriesToDelete times
 kc_gg *kc_top_level_call_ndeletes(kc_gg *ggOrig, int ratio, int nadds, int ndeletes, int verbose)
 {
     kc_gg *gg = kc_gg_extend2(ggOrig, ratio);
@@ -1106,7 +1119,7 @@ kc_gg *kc_top_level_call_ndeletes(kc_gg *ggOrig, int ratio, int nadds, int ndele
     printf("\nFinished reduction\n\n");
     return ggBest;
 }
-// try to insert and than delete for nIterations times 
+// try to insert and than delete for nIterations times
 kc_gg *kc_top_level_call_iterate(kc_gg *ggOrig, int ratio, int nadds, int nIterations, int verbose)
 {
     // kc_gg *gg = kc_gg_extend2(ggOrig, ratio);
@@ -1129,7 +1142,7 @@ kc_gg *kc_top_level_call_iterate(kc_gg *ggOrig, int ratio, int nadds, int nItera
     return ggBest;
 }
 
-// try to insert and than delete for nIterations times, in each iteration try to delete for nTriesToDelete times 
+// try to insert and than delete for nIterations times, in each iteration try to delete for nTriesToDelete times
 kc_gg *kc_top_level_call_iterate_ndeletes(kc_gg *ggOrig, int ratio, int nadds, int nIterations, int nTriesToDelete, int verbose)
 {
     // kc_gg *gg = kc_gg_extend2(ggOrig, ratio);
@@ -1307,7 +1320,7 @@ int main(int argc, char **argv)
         //     verbose ^= 1;
 
         // printf("arguments: %i, %i, %i, %i, %i\n", ratio, nAdds, nIterations, nTriesToDelete, verbose);
-        kc_top_level_call(argv[argc - 1], 3, 10, 5, 5, 1);
+        kc_top_level_call(argv[argc - 1], 3, 10, 0, 0, 1);
         // kc_top_level_call(argv[argc - 1], ratio, nAdds, nIterations, nTriesToDelete, verbose);
 
         // kc_gg *ggOrig = kc_gg_aiger_read(argv[argc - 1], 1, 0);
