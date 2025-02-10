@@ -4,22 +4,22 @@ This repository contains a C program implementing an algorithm for synthesizing 
 completely-specified multi-output Boolean functions. The algorithm leverages redundancy addition and 
 removal (RAR) and utilizes multi-input And-Inverter Graphs (MAIG) as its primary data structure.
 This algorithm was developed as part of my Bachelor's thesis in Applied Mathematics at the 
-National University of "Kyiv-Mohyla Academy." It was presented at the <a href="[http://www.lsi-cad.com/RM/RM2023/](https://mathconf.ukma.edu.ua/Program2024.pdf)">XII Ukrainian Scientific Conference of Young Mathematicians, 2024</a>.
+National University of "Kyiv-Mohyla Academy." It was presented at the <a href="https://mathconf.ukma.edu.ua/Program2024.pdf">XII Ukrainian Scientific Conference of Young Mathematicians, 2024</a>.
 
 The benchmarks used to evaluate the algorithms are taken from the set of 100 testcases of
 <a href="https://github.com/alanminko/iwls2022-ls-contest">IWLS Programming Contest 2022</a>.
 
 ## Usage
 To run the program, use the following command line: `./rewire-code [-IEGDFSTV <num>] <file.aig>` where:<br>
-`-I <num>` - the number of iterations;        
-`-E <num>` - the number of nodes to expand;
-`-G <num>` - the number of fanins that can be added;           
-`-D <num>` - the number of shared divisors to extract;          
-`-F <num>` - the limit on the fanin count at a node;         
-`-S <num>` - the random seed;
-`-T <num>` - the timeout in seconds;
-`-V <num>` - the verbosity level;                        
-`<file.aig> ` - the input file name;
+`-I <num>` - the number of iterations;<br>
+`-E <num>` - the number of nodes to expand;<br>
+`-G <num>` - the number of fanins that can be added;<br>          
+`-D <num>` - the number of shared divisors to extract;<br>        
+`-F <num>` - the limit on the fanin count at a node;<br>      
+`-S <num>` - the random seed;<br>
+`-T <num>` - the timeout in seconds;<br>
+`-V <num>` - the verbosity level;<br>                 
+`<file.aig> ` - the input file name;<br>
 ## Examples
 Here is the result of synthesis by the proposed algorithm for the AIG  
 of the 2 to 1 Multiplexer function:
