@@ -1,4 +1,4 @@
-# Circuit Minimization Algorithms
+# Boolean network optimization by stochastic rewiring
 
 This repository contains a C program implementing an algorithm for synthesizing minimal circuits for 
 completely-specified multi-output Boolean functions. The algorithm leverages redundancy addition and 
