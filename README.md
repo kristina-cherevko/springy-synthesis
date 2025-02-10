@@ -13,9 +13,9 @@ The benchmarks used to evaluate the algorithms are taken from the set of 100 tes
 To run the program, use the following command line: `./rewire-code [-IEGDFSTV <num>] <file.aig>` where:<br>
 `-I <num>` - the number of iterations;<br>
 `-E <num>` - the number of nodes to expand;<br>
-`-G <num>` - the number of fanins that can be added;<br>          
-`-D <num>` - the number of shared divisors to extract;<br>        
-`-F <num>` - the limit on the fanin count at a node;<br>      
+`-G <num>` - the number of fanins that can be added;<br>
+`-D <num>` - the number of shared divisors to extract;<br>
+`-F <num>` - the limit on the fanin count at a node;<br>
 `-S <num>` - the random seed;<br>
 `-T <num>` - the timeout in seconds;<br>
 `-V <num>` - the verbosity level;<br>                 
