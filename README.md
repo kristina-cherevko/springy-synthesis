@@ -18,7 +18,7 @@ To run the program, use the following command line: `./rewire-code [-IEGDFSTV <n
 `-F <num>` - the limit on the fanin count at a node;<br>
 `-S <num>` - the random seed;<br>
 `-T <num>` - the timeout in seconds;<br>
-`-V <num>` - the verbosity level;<br>                 
+`-V <num>` - the verbosity level;<br>      
 `<file.aig> ` - the input file name;<br>
 ## Examples
 Here is the result of synthesis by the proposed algorithm for the AIG  
